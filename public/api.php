@@ -1,116 +1,207 @@
 <?php
-header('Content-Type: application/json');
+// public/api.php
+header('Content-Type: application/json; charset=utf-8');
+session_start();
 require_once __DIR__ . '/../src/db.php';
 
-$action = $_GET['action'] ?? '';
-
-if ($action === 'get_slot_status') {
-    $pdo = getPDO();
-    // load all slots
-    $all = $pdo->query("SELECT id, svg_id FROM parking_slots")->fetchAll();
-    $map = [];
-    foreach ($all as $s) {
-        $key = $s['svg_id'] ?: 'slot-'.$s['id'];
-        $map[$key] = ['id'=>$s['id'],'status'=>'available','vehicle_number'=>null];
-    }
-    // load active reservations
-    $stmt = $pdo->query("SELECT r.parking_slot_id, r.status, r.vehicle_number, s.svg_id
-                         FROM reservations r
-                         JOIN parking_slots s ON r.parking_slot_id = s.id
-                         WHERE r.status IN ('booked','checked_in')");
-    foreach ($stmt->fetchAll() as $r) {
-        $key = $r['svg_id'] ?: 'slot-'.$r['parking_slot_id'];
-        $map[$key] = ['id'=>$r['parking_slot_id'],'status'=>$r['status'],'vehicle_number'=>$r['vehicle_number']];
-    }
-    echo json_encode(['slots'=>$map]);
-    exit;
+function current_user_id() {
+    return $_SESSION['user_id'] ?? null;
 }
 
-if ($action === 'reserve_slot' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $input = json_decode(file_get_contents('php://input'), true);
-    $svgId = $input['svg_id'] ?? null;
-    $vehicle = $input['vehicle_number'] ?? 'UNKNOWN';
-    if (!$svgId) { echo json_encode(['success'=>false,'message'=>'svg_id required']); exit; }
-    $pdo = getPDO();
-    $stmt = $pdo->prepare("SELECT id FROM parking_slots WHERE svg_id = ?");
-    $stmt->execute([$svgId]);
-    $slot = $stmt->fetch();
-    if (!$slot) { echo json_encode(['success'=>false,'message'=>'slot not found']); exit; }
-    $slotId = $slot['id'];
+$action = $_GET['action'] ?? $_POST['action'] ?? 'slots';
 
-    try {
-        $pdo->beginTransaction();
-        // lock any reservations for this slot
-        $check = $pdo->prepare("SELECT id FROM reservations WHERE parking_slot_id = ? AND status IN ('booked','checked_in') FOR UPDATE");
-        $check->execute([$slotId]);
-        if ($check->fetch()) { $pdo->rollBack(); echo json_encode(['success'=>false,'message'=>'already reserved']); exit; }
+try {
 
-        $now = (new DateTime())->format('Y-m-d H:i:s');
-        $end = (new DateTime('+2 hours'))->format('Y-m-d H:i:s');
-        $ins = $pdo->prepare("INSERT INTO reservations (user_id, vehicle_number, parking_slot_id, parking_lot_id, start_time, end_time, status, created_at)
-                              VALUES (NULL, ?, ?, 1, ?, ?, 'booked', NOW())");
-        $ins->execute([$vehicle, $slotId, $now, $end]);
-        $id = $pdo->lastInsertId();
-        $pdo->commit();
-        echo json_encode(['success'=>true,'reservation_id'=>$id]);
-    } catch (Exception $e) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
-        echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
-    }
-    exit;
-}
-
-if ($action === 'checkin_slot' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $input = json_decode(file_get_contents('php://input'), true);
-    $svgId = $input['svg_id'] ?? null;
-    $vehicle = $input['vehicle_number'] ?? 'UNKNOWN';
-    if (!$svgId) { echo json_encode(['success'=>false,'message'=>'svg_id required']); exit; }
-    $pdo = getPDO();
-    $stmt = $pdo->prepare("SELECT id FROM parking_slots WHERE svg_id = ?");
-    $stmt->execute([$svgId]);
-    $s = $stmt->fetch(); if (!$s) { echo json_encode(['success'=>false,'message'=>'slot not found']); exit; }
-    $slotId = $s['id'];
-
-    try {
-        $pdo->beginTransaction();
-        $sel = $pdo->prepare("SELECT id FROM reservations WHERE parking_slot_id = ? AND status IN ('booked','checked_in') LIMIT 1 FOR UPDATE");
-        $sel->execute([$slotId]);
-        $r = $sel->fetch();
-        if ($r) {
-            $upd = $pdo->prepare("UPDATE reservations SET status='checked_in', vehicle_number = ? WHERE id = ?");
-            $upd->execute([$vehicle, $r['id']]);
-            $pdo->commit();
-            echo json_encode(['success'=>true,'reservation_id'=>$r['id']]);
-        } else {
-            $now = (new DateTime())->format('Y-m-d H:i:s');
-            $end = (new DateTime('+2 hours'))->format('Y-m-d H:i:s');
-            $ins = $pdo->prepare("INSERT INTO reservations (user_id, vehicle_number, parking_slot_id, parking_lot_id, start_time, end_time, status, created_at)
-                                  VALUES (NULL, ?, ?, 1, ?, ?, 'checked_in', NOW())");
-            $ins->execute([$vehicle, $slotId, $now, $end]);
-            $id = $pdo->lastInsertId();
-            $pdo->commit();
-            echo json_encode(['success'=>true,'reservation_id'=>$id]);
+    // --------------------------------------------------------
+    //  GET USER INFO
+    // --------------------------------------------------------
+    if ($action === 'me' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $uid = current_user_id();
+        if (!$uid) {
+            http_response_code(401);
+            echo json_encode(['error' => 'Not authenticated']);
+            exit;
         }
-    } catch (Exception $e) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
-        echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
+
+        $stmt = $pdo->prepare("SELECT id, name, user_type, role_id FROM users WHERE id = ?");
+        $stmt->execute([$uid]);
+        echo json_encode($stmt->fetch());
+        exit;
     }
-    exit;
-}
 
-if ($action === 'release_slot' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $input = json_decode(file_get_contents('php://input'), true);
-    $svgId = $input['svg_id'] ?? null;
-    if (!$svgId) { echo json_encode(['success'=>false,'message'=>'svg_id required']); exit; }
-    $pdo = getPDO();
-    $stmt = $pdo->prepare("SELECT id FROM parking_slots WHERE svg_id = ?");
-    $stmt->execute([$svgId]);
-    $s = $stmt->fetch(); if (!$s) { echo json_encode(['success'=>false,'message'=>'slot not found']); exit; }
-    $slotId = $s['id'];
-    $upd = $pdo->prepare("UPDATE reservations SET status='cancelled' WHERE parking_slot_id = ? AND status IN ('booked','checked_in')");
-    $upd->execute([$slotId]);
-    echo json_encode(['success'=>true,'affected'=>$upd->rowCount()]);
-    exit;
-}
+    // --------------------------------------------------------
+    //  GET SLOT STATUS + RESERVATIONS
+    // --------------------------------------------------------
+    if ($action === 'slots' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $stmt = $pdo->query("
+            SELECT 
+                p.id AS slot_db_id,
+                p.svg_id,
+                COALESCE(p.label, p.slot_number, p.svg_id) AS label,
+                p.access_group,
+                r.user_id,
+                r.status,
+                r.reservation_name,
+                r.vehicle_no,
+                r.reserved_at
+            FROM parking_slots p
+            LEFT JOIN reservations r ON r.slot_id = p.id
+            ORDER BY p.id
+        ");
 
-echo json_encode(['success'=>false,'message'=>'unknown action']);
+        echo json_encode($stmt->fetchAll());
+        exit;
+    }
+
+    // --------------------------------------------------------
+    //  RESERVE SLOT + APPLY ROLE PERMISSIONS
+    // --------------------------------------------------------
+    if ($action === 'reserve' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+
+        $userId = current_user_id();
+        if (!$userId) {
+            http_response_code(401);
+            echo json_encode(['error' => 'Not authenticated']);
+            exit;
+        }
+
+        $data = json_decode(file_get_contents('php://input'), true) ?? [];
+        $slot_svg_id      = trim($data['slot_svg_id'] ?? '');
+        $reservation_name = trim($data['name'] ?? '');
+        $vehicle_no       = trim($data['vehicle_no'] ?? '');
+
+        if ($slot_svg_id === '' || $reservation_name === '' || $vehicle_no === '') {
+            http_response_code(400);
+            echo json_encode(['error' => 'Name, Vehicle No & Slot required']);
+            exit;
+        }
+
+        $pdo->beginTransaction();
+
+        // Fetch slot info
+        $stmt = $pdo->prepare("SELECT id, access_group, label, is_active FROM parking_slots WHERE svg_id = ? FOR UPDATE");
+        $stmt->execute([$slot_svg_id]);
+        $slot = $stmt->fetch();
+
+        if (!$slot) {
+            $pdo->rollBack();
+            http_response_code(404);
+            echo json_encode(['error' => 'Slot not found']);
+            exit;
+        }
+
+        if (!$slot['is_active']) {
+            $pdo->rollBack();
+            http_response_code(409);
+            echo json_encode(['error' => 'Slot inactive']);
+            exit;
+        }
+
+        $slotId = (int)$slot['id'];
+        $slotLabel = strtoupper($slot['label']);
+        $slotGroup = strtolower($slot['access_group']);
+
+        // Fetch user role
+        $stmt = $pdo->prepare("SELECT user_type FROM users WHERE id=?");
+        $stmt->execute([$userId]);
+        $userRole = strtolower($stmt->fetchColumn());
+
+        // ---------------- PERMISSION RULES ----------------
+        $allowed = false;
+
+        if ($userRole === 'hod') {
+            $allowed = true; // HOD gets all slots
+
+        } elseif ($userRole === 'faculty') {
+            // Faculty → everything except HOD slot
+            if ($slotLabel !== 'HOD') {
+                $allowed = true;
+            }
+
+        } elseif ($userRole === 'normal') {
+            // Normal users → ONLY R slots
+            if (preg_match("/^R[0-9]+$/", $slotLabel)) {
+                $allowed = true;
+            }
+        }
+
+        if (!$allowed) {
+            $pdo->rollBack();
+            http_response_code(403);
+            echo json_encode([
+                'error' => 'You are not allowed to reserve this parking slot'
+            ]);
+            exit;
+        }
+
+        // Ensure user has no existing reservation
+        $stmt = $pdo->prepare("SELECT id FROM reservations WHERE user_id = ? LIMIT 1");
+        $stmt->execute([$userId]);
+        if ($stmt->fetch()) {
+            $pdo->rollBack();
+            http_response_code(409);
+            echo json_encode(['error' => 'You already have a reservation']);
+            exit;
+        }
+
+        // Ensure slot is not already taken
+        $stmt = $pdo->prepare("SELECT id FROM reservations WHERE slot_id = ?");
+        $stmt->execute([$slotId]);
+        if ($stmt->fetch()) {
+            $pdo->rollBack();
+            http_response_code(409);
+            echo json_encode(['error' => 'Slot already reserved']);
+            exit;
+        }
+
+        // Create reservation
+        $stmt = $pdo->prepare("
+            INSERT INTO reservations (slot_id, reservation_name, user_id, vehicle_no, status, reserved_at)
+            VALUES (?, ?, ?, ?, 'reserved', NOW())
+        ");
+        $stmt->execute([$slotId, $reservation_name, $userId, $vehicle_no]);
+
+        $pdo->commit();
+        echo json_encode(['success' => true]);
+        exit;
+    }
+
+    // --------------------------------------------------------
+    //  CHECK-IN
+    // --------------------------------------------------------
+    if ($action === 'checkin' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $userId = current_user_id();
+        if (!$userId) { http_response_code(401); echo json_encode(['error' => 'Not authenticated']); exit; }
+
+        $stmt = $pdo->prepare("UPDATE reservations SET status = 'checked_in' WHERE user_id = ?");
+        $stmt->execute([$userId]);
+
+        echo json_encode(['success' => true]);
+        exit;
+    }
+
+    // --------------------------------------------------------
+    //  CANCEL RESERVATION
+    // --------------------------------------------------------
+    if ($action === 'cancel' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $userId = current_user_id();
+        if (!$userId) { http_response_code(401); echo json_encode(['error' => 'Not authenticated']); exit; }
+
+        $stmt = $pdo->prepare("DELETE FROM reservations WHERE user_id = ?");
+        $stmt->execute([$userId]);
+
+        echo json_encode(['success' => true]);
+        exit;
+    }
+
+    http_response_code(400);
+    echo json_encode(['error' => 'Invalid Request']);
+
+} catch (Exception $e) {
+    if ($pdo->inTransaction()) $pdo->rollBack();
+    http_response_code(500);
+    echo json_encode([
+        'error' => 'Server error',
+        'details' => $e->getMessage()
+    ]);
+}

@@ -1,13 +1,7 @@
 <?php
 // src/config.php
-return [
-  'db' => [
-    'dsn' => 'mysql:host=127.0.0.1;dbname=parking_db;charset=utf8mb4',
-    'user' => 'root',     // change if your DB user is different
-    'pass' => '',         // change to your DB password
-    'options' => [
-      PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-      PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ],
-  ],
-];
+// DB config for XAMPP local
+define('DB_HOST', '127.0.0.1');
+define('DB_NAME', 'parking_db');
+define('DB_USER', 'root');
+define('DB_PASS', '');       // default XAMPP: empty password
