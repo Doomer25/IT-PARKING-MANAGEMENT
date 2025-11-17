@@ -763,6 +763,7 @@ require_once __DIR__ . '/../src/db.php';
         if (s.user_type) node.dataset.userType = s.user_type;
         if (s.reservation_name) node.dataset.reservationName = s.reservation_name;
         if (s.vehicle_no) node.dataset.vehicleNo = s.vehicle_no;
+        if (s.vehicle_name) node.dataset.vehicleName = s.vehicle_name;
         if (s.reserved_at) node.dataset.reservedAt = s.reserved_at;
         if (s.status) node.dataset.resStatus = s.status;
       } else if (mine) {
@@ -1146,8 +1147,10 @@ require_once __DIR__ . '/../src/db.php';
                 <div style="font-size: 14px; color: #1e293b;">${escapeHtml(reservationName)}</div>
               </div>
               <div style="margin-bottom: 12px;">
-                <div style="font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Vehicle Number</div>
-                <div style="font-size: 14px; color: #1e293b;">${escapeHtml(vehicleNo)}</div>
+                <div style="font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Vehicle</div>
+                <div style="font-size: 14px; color: #1e293b;">
+                  ${vehicleName ? escapeHtml(vehicleName) + ' (' + escapeHtml(vehicleNo) + ')' : escapeHtml(vehicleNo)}
+                </div>
               </div>
               <div style="margin-bottom: 12px;">
                 <div style="font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Status</div>

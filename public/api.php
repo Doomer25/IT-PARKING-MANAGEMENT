@@ -61,14 +61,17 @@ try {
                     r.user_id,
                     r.status,
                     r.reservation_name,
+                    r.vehicle_id,
                     r.vehicle_no,
                     r.reserved_at,
                     u.name AS user_name,
                     u.email AS user_email,
-                    u.user_type AS user_type
+                    u.user_type AS user_type,
+                    v.vehicle_name
                 FROM parking_slots p
                 LEFT JOIN reservations r ON r.slot_id = p.id
                 LEFT JOIN users u ON u.id = r.user_id
+                LEFT JOIN vehicles v ON v.id = r.vehicle_id
                 ORDER BY p.id;
             ");
         } else {
