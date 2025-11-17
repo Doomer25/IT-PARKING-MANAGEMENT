@@ -1,6 +1,7 @@
 <?php
 // src/auth.php
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/config.php';
 
 // start session only if not already started
 if (session_status() === PHP_SESSION_NONE) {
@@ -68,6 +69,39 @@ function logout() {
         );
     }
     session_destroy();
+}
+
+/**
+ * Attempt admin login. Returns true on success, false on failure.
+ * @param string $username
+ * @param string $password
+ * @return bool
+ */
+function attempt_admin_login(string $username, string $password) {
+    if ($username === ADMIN_USERNAME && $password === ADMIN_PASSWORD) {
+        $_SESSION['is_admin'] = true;
+        $_SESSION['admin_username'] = $username;
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Check if current user is admin
+ * @return bool
+ */
+function is_admin() {
+    return isset($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
+}
+
+/**
+ * Require admin — redirect to login if not admin
+ */
+function require_admin() {
+    if (!is_admin()) {
+        header('Location: /IT-PARKING-MANAGEMENT/public/login.php');
+        exit;
+    }
 }
 
 /**
