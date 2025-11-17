@@ -110,6 +110,8 @@ try {
         $slot_svg_id = trim($data['slot_svg_id'] ?? '');
         $reservation_name = trim($data['name'] ?? '');
         $vehicle_id = intval($data['vehicle_id'] ?? 0);
+        $reservation_start_time = trim($data['reservation_start_time'] ?? '');
+        $reservation_end_time = trim($data['reservation_end_time'] ?? '');
         $vehicle_no = trim($data['vehicle_no'] ?? ''); // Fallback for backwards compatibility
 
         if ($slot_svg_id === '' || $reservation_name === '') {
@@ -237,32 +239,65 @@ try {
             exit;
         }
 
+        // Validate timing
+        if (empty($reservation_start_time) || empty($reservation_end_time)) {
+            $pdo->rollBack();
+            http_response_code(400);
+            echo json_encode(['error' => 'Reservation start and end times are required']);
+            exit;
+        }
+        
+        // Validate that end time is after start time
+        $startDateTime = new DateTime($reservation_start_time);
+        $endDateTime = new DateTime($reservation_end_time);
+        if ($endDateTime <= $startDateTime) {
+            $pdo->rollBack();
+            http_response_code(400);
+            echo json_encode(['error' => 'Check-out time must be after check-in time']);
+            exit;
+        }
+        
+        // Validate that start time is not in the past
+        $now = new DateTime();
+        if ($startDateTime < $now) {
+            $pdo->rollBack();
+            http_response_code(400);
+            echo json_encode(['error' => 'Check-in time cannot be in the past']);
+            exit;
+        }
+
         // Create Reservation (use vehicle_id if available)
         $reservationId = null;
         if ($vehicle_id > 0) {
             $stmt = $pdo->prepare("
-                INSERT INTO reservations (slot_id, reservation_name, user_id, vehicle_id, vehicle_no, status, reserved_at)
-                VALUES (?, ?, ?, ?, ?, 'reserved', NOW())
+                INSERT INTO reservations (slot_id, reservation_name, user_id, vehicle_id, vehicle_no, status, reservation_start_time, reservation_end_time, reserved_at)
+                VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?, NOW())
             ");
-            $stmt->execute([$slotId, $reservation_name, $userId, $vehicle_id, $vehicle_no]);
+            $stmt->execute([$slotId, $reservation_name, $userId, $vehicle_id, $vehicle_no, $reservation_start_time, $reservation_end_time]);
             $reservationId = $pdo->lastInsertId();
         } else {
             $stmt = $pdo->prepare("
-                INSERT INTO reservations (slot_id, reservation_name, user_id, vehicle_no, status, reserved_at)
-                VALUES (?, ?, ?, ?, 'reserved', NOW())
+                INSERT INTO reservations (slot_id, reservation_name, user_id, vehicle_no, status, reservation_start_time, reservation_end_time, reserved_at)
+                VALUES (?, ?, ?, ?, 'reserved', ?, ?, NOW())
             ");
-            $stmt->execute([$slotId, $reservation_name, $userId, $vehicle_no]);
+            $stmt->execute([$slotId, $reservation_name, $userId, $vehicle_no, $reservation_start_time, $reservation_end_time]);
             $reservationId = $pdo->lastInsertId();
         }
 
-        // Also insert into reservation_history for tracking
+        // Also insert into reservation_history for PERMANENT tracking
         if ($reservationId) {
-            $stmt = $pdo->prepare("
-                INSERT INTO reservation_history (reservation_id, user_id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'reserved', NOW(), NOW())
-            ");
-            $vehicleIdForHistory = $vehicle_id > 0 ? $vehicle_id : null;
-            $stmt->execute([$reservationId, $userId, $slotId, $vehicleIdForHistory, $vehicle_no, $reservation_name]);
+            try {
+                $stmt = $pdo->prepare("
+                    INSERT INTO reservation_history (reservation_id, user_id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at, reservation_start_time, reservation_end_time, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, 'reserved', NOW(), ?, ?, NOW())
+                ");
+                $vehicleIdForHistory = $vehicle_id > 0 ? $vehicle_id : null;
+                $stmt->execute([$reservationId, $userId, $slotId, $vehicleIdForHistory, $vehicle_no, $reservation_name, $reservation_start_time, $reservation_end_time]);
+            } catch (Exception $e) {
+                // If reservation_history table doesn't exist yet, continue (will be created by SQL)
+                // Log error but don't fail the reservation
+                error_log("Failed to create reservation history: " . $e->getMessage());
+            }
         }
 
         $pdo->commit();
@@ -281,16 +316,22 @@ try {
         $stmt->execute([$uid]);
         $reservation = $stmt->fetch();
         
-        // Update active reservation
-        $stmt = $pdo->prepare("UPDATE reservations SET status='checked_in' WHERE user_id=?");
-        $stmt->execute([$uid]);
+        // Update active reservation with check-in time (try with checked_in_at column first)
+        try {
+            $stmt = $pdo->prepare("UPDATE reservations SET status='checked_in', checked_in_at=NOW() WHERE user_id=? AND status='reserved'");
+            $stmt->execute([$uid]);
+        } catch (Exception $e) {
+            // Column doesn't exist yet, update without checked_in_at
+            $stmt = $pdo->prepare("UPDATE reservations SET status='checked_in' WHERE user_id=? AND status='reserved'");
+            $stmt->execute([$uid]);
+        }
         
         // Update reservation_history
         if ($reservation) {
             $stmt = $pdo->prepare("
                 UPDATE reservation_history 
-                SET status = 'checked_in'
-                WHERE reservation_id = ? AND status != 'completed'
+                SET status = 'checked_in', checked_in_at = NOW()
+                WHERE reservation_id = ? AND status != 'completed' AND checked_in_at IS NULL
             ");
             $stmt->execute([$reservation['id']]);
         }
@@ -305,25 +346,68 @@ try {
     if ($action === 'cancel' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $uid = current_user_id();
         
-        // Get reservation details before deleting
-        $stmt = $pdo->prepare("SELECT id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at FROM reservations WHERE user_id = ?");
-        $stmt->execute([$uid]);
-        $reservation = $stmt->fetch();
-        
-        if ($reservation) {
-            // Update reservation_history with check-out time
-            $stmt = $pdo->prepare("
-                UPDATE reservation_history 
-                SET checked_out_at = NOW(), status = 'cancelled'
-                WHERE reservation_id = ? AND checked_out_at IS NULL
-            ");
-            $stmt->execute([$reservation['id']]);
+        $pdo->beginTransaction();
+        try {
+            // Get reservation details before deleting
+            $stmt = $pdo->prepare("SELECT id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at, checked_in_at FROM reservations WHERE user_id = ?");
+            $stmt->execute([$uid]);
+            $reservation = $stmt->fetch();
+            
+            if ($reservation) {
+                $reservationId = $reservation['id'];
+                
+                // Ensure reservation_history entry exists (create if not exists, update if exists)
+                try {
+                    // Check if history entry exists
+                    $stmt = $pdo->prepare("SELECT id FROM reservation_history WHERE reservation_id = ?");
+                    $stmt->execute([$reservationId]);
+                    $historyExists = $stmt->fetch();
+                    
+                    if ($historyExists) {
+                        // Update existing history entry with check-out time
+                        $stmt = $pdo->prepare("
+                            UPDATE reservation_history 
+                            SET checked_out_at = NOW(), status = 'cancelled'
+                            WHERE reservation_id = ? AND checked_out_at IS NULL
+                        ");
+                        $stmt->execute([$reservationId]);
+                    } else {
+                        // Create history entry if it doesn't exist (for old reservations made before history tracking)
+                        // IMPORTANT: Use the actual reserved_at from reservation, not NOW()
+                        $stmt = $pdo->prepare("
+                            INSERT INTO reservation_history 
+                            (reservation_id, user_id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at, checked_in_at, checked_out_at, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, 'cancelled', ?, ?, NOW(), NOW())
+                        ");
+                        $stmt->execute([
+                            $reservationId,
+                            $uid,
+                            $reservation['slot_id'],
+                            $reservation['vehicle_id'],
+                            $reservation['vehicle_no'],
+                            $reservation['reservation_name'],
+                            $reservation['reserved_at'],
+                            $reservation['checked_in_at']
+                        ]);
+                    }
+                } catch (Exception $e) {
+                    // If reservation_history table doesn't exist, log error but continue
+                    error_log("Failed to save reservation history on cancel: " . $e->getMessage());
+                    // Don't fail the cancel operation - history is important but shouldn't block cancellation
+                }
+            }
+            
+            // Delete from active reservations (after saving to history)
+            $stmt = $pdo->prepare("DELETE FROM reservations WHERE user_id=?");
+            $stmt->execute([$uid]);
+            
+            $pdo->commit();
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            http_response_code(500);
+            echo json_encode(['error' => 'Failed to cancel reservation: ' . $e->getMessage()]);
         }
-        
-        // Delete from active reservations
-        $stmt = $pdo->prepare("DELETE FROM reservations WHERE user_id=?");
-        $stmt->execute([$uid]);
-        echo json_encode(['success' => true]);
         exit;
     }
 
@@ -511,19 +595,79 @@ try {
         }
 
         $data = json_decode(file_get_contents('php://input'), true) ?? [];
-        $slot_id = intval($data['slot_id'] ?? 0);
-
-        if (!$slot_id) {
+        $slotId = intval($data['slot_id'] ?? 0);
+        
+        if (!$slotId) {
             http_response_code(400);
             echo json_encode(['error' => 'slot_id required']);
             exit;
         }
 
-        $stmt = $pdo->prepare("DELETE FROM reservations WHERE slot_id = ?");
-        $stmt->execute([$slot_id]);
-        echo json_encode(['success' => true]);
+        $pdo->beginTransaction();
+        try {
+            // Get reservation details before deleting
+            $stmt = $pdo->prepare("SELECT id, user_id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at, checked_in_at FROM reservations WHERE slot_id = ?");
+            $stmt->execute([$slotId]);
+            $reservation = $stmt->fetch();
+            
+            if ($reservation) {
+                $reservationId = $reservation['id'];
+                $userId = $reservation['user_id'];
+                
+                // Ensure reservation_history entry exists (create if not exists, update if exists)
+                try {
+                    // Check if history entry exists
+                    $stmt = $pdo->prepare("SELECT id FROM reservation_history WHERE reservation_id = ?");
+                    $stmt->execute([$reservationId]);
+                    $historyExists = $stmt->fetch();
+                    
+                    if ($historyExists) {
+                        // Update existing history entry with check-out time
+                        $stmt = $pdo->prepare("
+                            UPDATE reservation_history 
+                            SET checked_out_at = NOW(), status = 'cancelled'
+                            WHERE reservation_id = ? AND checked_out_at IS NULL
+                        ");
+                        $stmt->execute([$reservationId]);
+                    } else {
+                        // Create history entry if it doesn't exist
+                        $stmt = $pdo->prepare("
+                            INSERT INTO reservation_history 
+                            (reservation_id, user_id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at, checked_in_at, checked_out_at, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, 'cancelled', ?, ?, NOW(), NOW())
+                        ");
+                        $stmt->execute([
+                            $reservationId,
+                            $userId,
+                            $reservation['slot_id'],
+                            $reservation['vehicle_id'],
+                            $reservation['vehicle_no'],
+                            $reservation['reservation_name'],
+                            $reservation['reserved_at'],
+                            $reservation['checked_in_at']
+                        ]);
+                    }
+                } catch (Exception $e) {
+                    // If reservation_history table doesn't exist, log error but continue
+                    error_log("Failed to save reservation history on admin free slot: " . $e->getMessage());
+                    // Don't fail the free slot operation - history is important but shouldn't block it
+                }
+            }
+            
+            // Delete from active reservations (after saving to history)
+            $stmt = $pdo->prepare("DELETE FROM reservations WHERE slot_id = ?");
+            $stmt->execute([$slotId]);
+            
+            $pdo->commit();
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            http_response_code(500);
+            echo json_encode(['error' => 'Failed to free slot: ' . $e->getMessage()]);
+        }
         exit;
     }
+
 
     // ============================
     // ADMIN: DELETE USER
@@ -580,25 +724,45 @@ try {
             exit;
         }
 
-        // Total reservations (all time) - from history table if available, else active
+        // Total reservations (all time) - from PERMANENT history table first, then add active reservations
+        $totalReservations = 0;
         try {
+            // Count from permanent history
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM reservation_history WHERE user_id = ?");
             $stmt->execute([$uid]);
-            $totalReservations = $stmt->fetchColumn();
-            if ($totalReservations == 0) {
+            $totalReservations = (int)$stmt->fetchColumn();
+            
+            // Also count active reservations that might not be in history yet (for backward compatibility)
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT COUNT(*) FROM reservations r
+                    LEFT JOIN reservation_history rh ON rh.reservation_id = r.id
+                    WHERE r.user_id = ? AND rh.id IS NULL
+                ");
+                $stmt->execute([$uid]);
+                $notInHistory = (int)$stmt->fetchColumn();
+                $totalReservations += $notInHistory;
+            } catch (Exception $e2) {
+                // If join fails, just count all active reservations
                 $stmt = $pdo->prepare("SELECT COUNT(*) FROM reservations WHERE user_id = ?");
                 $stmt->execute([$uid]);
-                $totalReservations = $stmt->fetchColumn();
+                $totalReservations += (int)$stmt->fetchColumn();
             }
         } catch (Exception $e) {
-            // If reservation_history table doesn't exist yet, use active reservations
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM reservations WHERE user_id = ?");
-            $stmt->execute([$uid]);
-            $totalReservations = $stmt->fetchColumn();
+            // If reservation_history table doesn't exist yet, use only active reservations
+            try {
+                $stmt = $pdo->prepare("SELECT COUNT(*) FROM reservations WHERE user_id = ?");
+                $stmt->execute([$uid]);
+                $totalReservations = (int)$stmt->fetchColumn();
+            } catch (Exception $e2) {
+                $totalReservations = 0;
+            }
         }
 
-        // Current month reservations
+        // Current month reservations - from PERMANENT history first
+        $currentMonthReservations = 0;
         try {
+            // Count from permanent history for current month
             $stmt = $pdo->prepare("
                 SELECT COUNT(*) FROM reservation_history
                 WHERE user_id = ? 
@@ -606,8 +770,23 @@ try {
                 AND YEAR(reserved_at) = YEAR(CURRENT_DATE())
             ");
             $stmt->execute([$uid]);
-            $currentMonthReservations = $stmt->fetchColumn();
-            if ($currentMonthReservations == 0) {
+            $currentMonthReservations = (int)$stmt->fetchColumn();
+            
+            // Also count active reservations for current month that might not be in history
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*) FROM reservations r
+                LEFT JOIN reservation_history rh ON rh.reservation_id = r.id
+                WHERE r.user_id = ? 
+                AND MONTH(r.reserved_at) = MONTH(CURRENT_DATE())
+                AND YEAR(r.reserved_at) = YEAR(CURRENT_DATE())
+                AND rh.id IS NULL
+            ");
+            $stmt->execute([$uid]);
+            $notInHistory = (int)$stmt->fetchColumn();
+            $currentMonthReservations += $notInHistory;
+        } catch (Exception $e) {
+            // If reservation_history table doesn't exist, use only active reservations
+            try {
                 $stmt = $pdo->prepare("
                     SELECT COUNT(*) FROM reservations 
                     WHERE user_id = ? 
@@ -615,17 +794,10 @@ try {
                     AND YEAR(reserved_at) = YEAR(CURRENT_DATE())
                 ");
                 $stmt->execute([$uid]);
-                $currentMonthReservations = $stmt->fetchColumn();
+                $currentMonthReservations = (int)$stmt->fetchColumn();
+            } catch (Exception $e2) {
+                $currentMonthReservations = 0;
             }
-        } catch (Exception $e) {
-            $stmt = $pdo->prepare("
-                SELECT COUNT(*) FROM reservations 
-                WHERE user_id = ? 
-                AND MONTH(reserved_at) = MONTH(CURRENT_DATE())
-                AND YEAR(reserved_at) = YEAR(CURRENT_DATE())
-            ");
-            $stmt->execute([$uid]);
-            $currentMonthReservations = $stmt->fetchColumn();
         }
 
         // Most used vehicle
@@ -690,6 +862,159 @@ try {
     }
 
     // ============================
+    // GET VEHICLE PARKING HISTORY
+    // ============================
+    if ($action === 'vehicle_history' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $uid = current_user_id();
+        if (!$uid) {
+            http_response_code(401);
+            echo json_encode(['error' => 'Not authenticated']);
+            exit;
+        }
+
+        $vehicleId = intval($_GET['vehicle_id'] ?? 0);
+        if (!$vehicleId) {
+            http_response_code(400);
+            echo json_encode(['error' => 'vehicle_id required']);
+            exit;
+        }
+
+        // Verify vehicle belongs to user and get vehicle_no
+        $stmt = $pdo->prepare("SELECT id, vehicle_no FROM vehicles WHERE id = ? AND user_id = ?");
+        $stmt->execute([$vehicleId, $uid]);
+        $vehicle = $stmt->fetch();
+        if (!$vehicle) {
+            http_response_code(403);
+            echo json_encode(['error' => 'Vehicle not found or access denied']);
+            exit;
+        }
+        $vehicleNo = $vehicle['vehicle_no'] ?? null;
+
+        // Get vehicle parking history - ALWAYS use PERMANENT history first
+        // Search by BOTH vehicle_id AND vehicle_no (for old reservations that might not have vehicle_id)
+        $history = [];
+        try {
+            // Primary source: PERMANENT reservation_history (includes released/cancelled slots)
+            // Search by vehicle_id OR vehicle_no (for backward compatibility)
+            $stmt = $pdo->prepare("
+                SELECT 
+                    DATE(rh.reserved_at) as date,
+                    p.slot_number,
+                    p.label,
+                    rh.status,
+                    rh.reserved_at,
+                    rh.checked_in_at,
+                    rh.checked_out_at
+                FROM reservation_history rh
+                LEFT JOIN parking_slots p ON p.id = rh.slot_id
+                WHERE rh.user_id = ? 
+                AND (rh.vehicle_id = ? OR rh.vehicle_no = ?)
+                ORDER BY rh.reserved_at DESC
+            ");
+            $stmt->execute([$uid, $vehicleId, $vehicleNo]);
+            $historyFromTable = $stmt->fetchAll();
+            
+            // Also get active reservations that might not be in history yet (backward compatibility)
+            // Search by BOTH vehicle_id AND vehicle_no
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        DATE(r.reserved_at) as date,
+                        p.slot_number,
+                        p.label,
+                        r.status,
+                        r.reserved_at,
+                        r.checked_in_at,
+                        NULL as checked_out_at
+                    FROM reservations r
+                    LEFT JOIN parking_slots p ON p.id = r.slot_id
+                    LEFT JOIN reservation_history rh ON rh.reservation_id = r.id
+                    WHERE r.user_id = ? 
+                    AND (r.vehicle_id = ? OR r.vehicle_no = ?)
+                    AND rh.id IS NULL
+                    ORDER BY r.reserved_at DESC
+                ");
+                $stmt->execute([$uid, $vehicleId, $vehicleNo]);
+                $activeReservations = $stmt->fetchAll();
+                
+                // Combine: history first, then active that aren't in history
+                $history = array_merge($historyFromTable, $activeReservations);
+            } catch (Exception $e) {
+                // If join fails, just use history
+                $history = $historyFromTable;
+            }
+        } catch (Exception $e) {
+            // If reservation_history table doesn't exist yet, fallback to active reservations
+        }
+
+        // If still no history, fallback to active reservations only
+        // Search by BOTH vehicle_id AND vehicle_no for maximum compatibility
+        if (empty($history)) {
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        DATE(r.reserved_at) as date,
+                        p.slot_number,
+                        p.label,
+                        r.status,
+                        r.reserved_at,
+                        r.checked_in_at,
+                        NULL as checked_out_at
+                    FROM reservations r
+                    LEFT JOIN parking_slots p ON p.id = r.slot_id
+                    WHERE r.user_id = ? 
+                    AND (r.vehicle_id = ? OR r.vehicle_no = ?)
+                    ORDER BY r.reserved_at DESC
+                ");
+                $stmt->execute([$uid, $vehicleId, $vehicleNo]);
+                $history = $stmt->fetchAll();
+            } catch (Exception $e) {
+                // Column might not exist, try without checked_in_at
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        DATE(r.reserved_at) as date,
+                        p.slot_number,
+                        p.label,
+                        r.status,
+                        r.reserved_at,
+                        NULL as checked_in_at,
+                        NULL as checked_out_at
+                    FROM reservations r
+                    LEFT JOIN parking_slots p ON p.id = r.slot_id
+                    WHERE r.user_id = ? 
+                    AND (r.vehicle_id = ? OR r.vehicle_no = ?)
+                    ORDER BY r.reserved_at DESC
+                ");
+                $stmt->execute([$uid, $vehicleId, $vehicleNo]);
+                $history = $stmt->fetchAll();
+            }
+        }
+
+        // Format history data
+        $formattedHistory = [];
+        foreach ($history as $item) {
+            $reservedTime = $item['reserved_at'] ? date('H:i', strtotime($item['reserved_at'])) : null;
+            $checkedInTime = $item['checked_in_at'] ? date('H:i', strtotime($item['checked_in_at'])) : null;
+            $checkedOutTime = $item['checked_out_at'] ? date('H:i', strtotime($item['checked_out_at'])) : null;
+            
+            $formattedHistory[] = [
+                'date' => date('F j, Y', strtotime($item['date'])),
+                'slot' => $item['slot_number'] ?? $item['label'] ?? 'N/A',
+                'status' => $item['status'],
+                'reserved_time' => $reservedTime,
+                'checked_in_time' => $checkedInTime,
+                'checked_out_time' => $checkedOutTime
+            ];
+        }
+
+        echo json_encode([
+            'vehicle_id' => $vehicleId,
+            'history' => $formattedHistory
+        ]);
+        exit;
+    }
+
+    // ============================
     // GET RESERVATION CALENDAR DATA
     // ============================
     if ($action === 'calendar' && $_SERVER['REQUEST_METHOD'] === 'GET') {
@@ -703,24 +1028,122 @@ try {
         $year = intval($_GET['year'] ?? date('Y'));
         $month = intval($_GET['month'] ?? date('m'));
 
-        // Get all reservations for the month
-        $stmt = $pdo->prepare("
-            SELECT 
-                DAY(reserved_at) as day,
-                p.slot_number,
-                p.label,
-                v.vehicle_name,
-                r.status
-            FROM reservations r
-            LEFT JOIN parking_slots p ON p.id = r.slot_id
-            LEFT JOIN vehicles v ON v.id = r.vehicle_id
-            WHERE r.user_id = ?
-            AND MONTH(reserved_at) = ?
-            AND YEAR(reserved_at) = ?
-            ORDER BY day ASC
-        ");
-        $stmt->execute([$uid, $month, $year]);
-        $reservations = $stmt->fetchAll();
+        // Get all reservations for the month - ALWAYS use PERMANENT history first
+        $reservations = [];
+        try {
+            // Primary source: PERMANENT reservation_history (includes released/cancelled slots)
+            $stmt = $pdo->prepare("
+                SELECT 
+                    DAY(rh.reserved_at) as day,
+                    p.slot_number,
+                    p.label,
+                    v.vehicle_name,
+                    rh.status,
+                    rh.reserved_at,
+                    rh.checked_in_at,
+                    rh.checked_out_at
+                FROM reservation_history rh
+                LEFT JOIN parking_slots p ON p.id = rh.slot_id
+                LEFT JOIN vehicles v ON v.id = rh.vehicle_id
+                WHERE rh.user_id = ?
+                AND MONTH(rh.reserved_at) = ?
+                AND YEAR(rh.reserved_at) = ?
+                ORDER BY day ASC, rh.reserved_at ASC
+            ");
+            $stmt->execute([$uid, $month, $year]);
+            $historyReservations = $stmt->fetchAll();
+            
+            // Also get active reservations that might not be in history yet (backward compatibility)
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        DAY(r.reserved_at) as day,
+                        p.slot_number,
+                        p.label,
+                        v.vehicle_name,
+                        r.status,
+                        r.reserved_at,
+                        r.checked_in_at,
+                        NULL as checked_out_at
+                    FROM reservations r
+                    LEFT JOIN parking_slots p ON p.id = r.slot_id
+                    LEFT JOIN vehicles v ON v.id = r.vehicle_id
+                    LEFT JOIN reservation_history rh ON rh.reservation_id = r.id
+                    WHERE r.user_id = ?
+                    AND MONTH(r.reserved_at) = ?
+                    AND YEAR(r.reserved_at) = ?
+                    AND rh.id IS NULL
+                    ORDER BY day ASC, r.reserved_at ASC
+                ");
+                $stmt->execute([$uid, $month, $year]);
+                $activeReservations = $stmt->fetchAll();
+                
+                // Combine history and active (history takes precedence)
+                $reservationIdsInHistory = array_column($historyReservations, 'reservation_id');
+                foreach ($activeReservations as $active) {
+                    // Only add if not already in history
+                    if (!in_array($active['id'] ?? null, $reservationIdsInHistory)) {
+                        $reservations[] = $active;
+                    }
+                }
+            } catch (Exception $e) {
+                // If join fails, just use history
+            }
+            
+            // Add history reservations
+            $reservations = array_merge($historyReservations, $reservations);
+        } catch (Exception $e) {
+            // If reservation_history table doesn't exist yet, fallback to active reservations
+        }
+        
+        // If no history found, fallback to active reservations (with checked_in_at if column exists)
+        if (empty($reservations)) {
+            try {
+                // Try with checked_in_at column first
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        DAY(r.reserved_at) as day,
+                        p.slot_number,
+                        p.label,
+                        v.vehicle_name,
+                        r.status,
+                        r.reserved_at,
+                        r.checked_in_at,
+                        NULL as checked_out_at
+                    FROM reservations r
+                    LEFT JOIN parking_slots p ON p.id = r.slot_id
+                    LEFT JOIN vehicles v ON v.id = r.vehicle_id
+                    WHERE r.user_id = ?
+                    AND MONTH(r.reserved_at) = ?
+                    AND YEAR(r.reserved_at) = ?
+                    ORDER BY day ASC, r.reserved_at ASC
+                ");
+                $stmt->execute([$uid, $month, $year]);
+                $reservations = $stmt->fetchAll();
+            } catch (Exception $e) {
+                // Column doesn't exist yet, use without checked_in_at
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        DAY(r.reserved_at) as day,
+                        p.slot_number,
+                        p.label,
+                        v.vehicle_name,
+                        r.status,
+                        r.reserved_at,
+                        NULL as checked_in_at,
+                        NULL as checked_out_at
+                    FROM reservations r
+                    LEFT JOIN parking_slots p ON p.id = r.slot_id
+                    LEFT JOIN vehicles v ON v.id = r.vehicle_id
+                    WHERE r.user_id = ?
+                    AND MONTH(r.reserved_at) = ?
+                    AND YEAR(r.reserved_at) = ?
+                    ORDER BY day ASC, r.reserved_at ASC
+                ");
+                $stmt->execute([$uid, $month, $year]);
+                $reservations = $stmt->fetchAll();
+            }
+        }
 
         // Format reservations by day
         $calendarData = [];
@@ -729,10 +1152,22 @@ try {
             if (!isset($calendarData[$day])) {
                 $calendarData[$day] = [];
             }
+            
+            // Format times
+            $reservedTime = $res['reserved_at'] ? date('H:i', strtotime($res['reserved_at'])) : null;
+            $checkedInTime = $res['checked_in_at'] ? date('H:i', strtotime($res['checked_in_at'])) : null;
+            $checkedOutTime = $res['checked_out_at'] ? date('H:i', strtotime($res['checked_out_at'])) : null;
+            
             $calendarData[$day][] = [
                 'slot' => $res['slot_number'] ?? $res['label'] ?? 'N/A',
                 'vehicle' => $res['vehicle_name'] ?? 'N/A',
-                'status' => $res['status']
+                'status' => $res['status'],
+                'reserved_at' => $res['reserved_at'],
+                'reserved_time' => $reservedTime,
+                'checked_in_at' => $res['checked_in_at'],
+                'checked_in_time' => $checkedInTime,
+                'checked_out_at' => $res['checked_out_at'],
+                'checked_out_time' => $checkedOutTime
             ];
         }
 

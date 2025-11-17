@@ -634,6 +634,43 @@ $reservedSlot = $stmt->fetch();
       color: #cbd5e1;
     }
 
+    body.dark-mode .stats-dashboard h4 {
+      color: #f1f5f9;
+    }
+
+    body.dark-mode .stats-dashboard select {
+      background: #334155;
+      border-color: #475569;
+      color: #f1f5f9;
+    }
+
+    body.dark-mode .stats-dashboard select option {
+      background: #334155;
+      color: #f1f5f9;
+    }
+
+    .vehicle-search-result-item {
+      padding: 16px;
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      transition: all 0.2s;
+    }
+
+    .vehicle-search-result-item:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    body.dark-mode .vehicle-search-result-item {
+      background: #334155;
+      border-color: #475569;
+    }
+
+    body.dark-mode .vehicle-search-result-item:hover {
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
     /* Reservation Calendar Dark Mode */
     body.dark-mode .reservation-calendar {
       background: transparent;
@@ -846,8 +883,31 @@ $reservedSlot = $stmt->fetch();
             <span class="info-label">Reserved At</span>
             <span class="info-value"><?= htmlspecialchars($reservedSlot['reserved_at']); ?></span>
           </div>
+          <?php if (!empty($reservedSlot['reservation_start_time'])): ?>
+          <div class="info-item">
+            <span class="info-label">Check-in Time</span>
+            <span class="info-value"><?= htmlspecialchars(date('M j, Y H:i', strtotime($reservedSlot['reservation_start_time']))); ?></span>
+          </div>
+          <?php endif; ?>
+          <?php if (!empty($reservedSlot['reservation_end_time'])): ?>
+          <div class="info-item">
+            <span class="info-label">Check-out Time</span>
+            <span class="info-value"><?= htmlspecialchars(date('M j, Y H:i', strtotime($reservedSlot['reservation_end_time']))); ?></span>
+          </div>
+          <?php endif; ?>
+          <?php if (!empty($reservedSlot['checked_in_at'])): ?>
+          <div class="info-item">
+            <span class="info-label">Checked In At</span>
+            <span class="info-value"><?= htmlspecialchars(date('M j, Y H:i', strtotime($reservedSlot['checked_in_at']))); ?></span>
+          </div>
+          <?php endif; ?>
         </div>
-        <div style="margin-top: 24px;">
+        <div style="margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap;">
+          <?php if ($reservedSlot['status'] === 'reserved'): ?>
+          <button id="checkin" class="btn-action">✓ Check In</button>
+          <?php elseif ($reservedSlot['status'] === 'checked_in'): ?>
+          <button id="checkout" class="btn-action" style="background: #10b981;">✓ Check Out</button>
+          <?php endif; ?>
           <button id="cancel" class="btn-ghost">Release Slot</button>
         </div>
       <?php else: ?>
@@ -862,7 +922,7 @@ $reservedSlot = $stmt->fetch();
     <!-- Statistics Dashboard -->
     <div class="stats-dashboard" style="margin-top: 32px; padding: 24px; background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%); border-radius: 12px; border: 2px solid #e2e8f0; transition: background 0.3s ease, border-color 0.3s ease;">
       <h3 style="font-size: 20px; font-weight: 600; color: #1e293b; margin-bottom: 24px; transition: color 0.3s ease;">📊 Statistics Dashboard</h3>
-      <div id="stats-content" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+      <div id="stats-content" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px;">
         <!-- Stats will be loaded here -->
         <div style="text-align: center; padding: 20px; background: white; border-radius: 8px; border: 1px solid #e2e8f0;">
           <div style="font-size: 32px; font-weight: 700; color: #667eea; margin-bottom: 8px;" id="total-reservations">0</div>
@@ -879,6 +939,29 @@ $reservedSlot = $stmt->fetch();
         <div style="text-align: center; padding: 20px; background: white; border-radius: 8px; border: 1px solid #e2e8f0;">
           <div style="font-size: 32px; font-weight: 700; color: #8b5cf6; margin-bottom: 8px;" id="average-duration">-</div>
           <div style="font-size: 14px; color: #64748b;">Avg. Duration (hrs)</div>
+        </div>
+      </div>
+
+      <!-- Vehicle Search Section -->
+      <div style="margin-top: 32px; padding-top: 24px; border-top: 2px solid #e2e8f0;">
+        <h4 style="font-size: 18px; font-weight: 600; color: #1e293b; margin-bottom: 16px; transition: color 0.3s ease;">🔍 Search Vehicle Parking History</h4>
+        <div style="display: flex; gap: 12px; align-items: end; margin-bottom: 20px; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 200px;">
+            <label style="font-size: 12px; color: #64748b; margin-bottom: 6px; display: block; font-weight: 500;">Select Vehicle</label>
+            <select id="vehicle-search-select" style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; background: white; color: #1e293b; cursor: pointer; transition: all 0.2s;">
+              <option value="">Select a vehicle...</option>
+            </select>
+          </div>
+          <button id="search-vehicle-btn" class="btn-action" style="padding: 10px 24px; font-size: 14px; white-space: nowrap;">🔍 Search</button>
+          <button id="clear-search-btn" class="btn-ghost" style="padding: 10px 24px; font-size: 14px; white-space: nowrap; display: none;">Clear</button>
+        </div>
+        
+        <!-- Search Results -->
+        <div id="vehicle-search-results" style="display: none; margin-top: 24px;">
+          <div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 16px; transition: color 0.3s ease;">Parking History</div>
+          <div id="vehicle-search-results-content" style="display: grid; gap: 12px;">
+            <!-- Results will be loaded here -->
+          </div>
         </div>
       </div>
     </div>
@@ -910,6 +993,24 @@ $reservedSlot = $stmt->fetch();
       </div>
       <div class="modern-modal-footer">
         <button id="calendar-close-btn" class="modern-modal-btn modern-modal-btn-secondary">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Day Reservations Details Modal -->
+  <div id="day-reservations-modal" class="modern-modal-overlay" style="display: none;">
+    <div class="modern-modal" style="max-width: 600px;">
+      <div class="modern-modal-header">
+        <h3 id="day-reservations-title">Reservations</h3>
+        <button class="modern-modal-close" id="day-reservations-close">×</button>
+      </div>
+      <div class="modern-modal-body" style="max-height: 70vh; overflow-y: auto;">
+        <div id="day-reservations-content">
+          <!-- Reservations will be loaded here -->
+        </div>
+      </div>
+      <div class="modern-modal-footer">
+        <button id="day-reservations-close-btn" class="modern-modal-btn modern-modal-btn-secondary">Close</button>
       </div>
     </div>
   </div>
@@ -1076,6 +1177,84 @@ async function modernConfirm(message, title = "Confirm", danger = false) {
 
 async function modernPrompt(message, defaultValue = "", title = "Input", placeholder = "") {
   return await showModal({ type: "prompt", title, message, defaultValue, placeholder });
+}
+
+// Check-in functionality
+const checkinBtn = document.getElementById("checkin");
+if (checkinBtn) {
+  checkinBtn.addEventListener("click", async () => {
+    const confirmed = await modernConfirm(
+      "Are you sure you want to check in?",
+      "Check In"
+    );
+    if (!confirmed) return;
+    
+    const btn = checkinBtn;
+    const originalText = btn.textContent;
+    btn.textContent = "Checking in...";
+    btn.disabled = true;
+    
+    try {
+      const res = await fetch(`${API}?action=checkin`, {
+        method: "POST",
+        credentials: "include"
+      });
+      const body = await res.json();
+      
+      if (!res.ok) {
+        await modernAlert(body.error || "Failed to check in. Please try again.", "Error");
+        btn.textContent = originalText;
+        btn.disabled = false;
+        return;
+      }
+      
+      await modernAlert("Successfully checked in!", "Success");
+      location.reload(); // Reload to show updated status
+    } catch (err) {
+      await modernAlert("Network error. Please try again.", "Error");
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }
+  });
+}
+
+// Check-out functionality
+const checkoutBtn = document.getElementById("checkout");
+if (checkoutBtn) {
+  checkoutBtn.addEventListener("click", async () => {
+    const confirmed = await modernConfirm(
+      "Are you sure you want to check out? Your slot will be released.",
+      "Check Out"
+    );
+    if (!confirmed) return;
+    
+    const btn = checkoutBtn;
+    const originalText = btn.textContent;
+    btn.textContent = "Checking out...";
+    btn.disabled = true;
+    
+    try {
+      const res = await fetch(`${API}?action=checkout`, {
+        method: "POST",
+        credentials: "include"
+      });
+      const body = await res.json();
+      
+      if (!res.ok) {
+        await modernAlert(body.error || "Failed to check out. Please try again.", "Error");
+        btn.textContent = originalText;
+        btn.disabled = false;
+        return;
+      }
+      
+      await modernAlert("Successfully checked out! Your slot has been released.", "Success");
+      location.reload(); // Reload to show updated status
+    } catch (err) {
+      await modernAlert("Network error. Please try again.", "Error");
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }
+  });
 }
 
 document.getElementById("cancel")?.addEventListener("click", async () => {
@@ -1391,11 +1570,42 @@ function generateCalendar(data) {
     // Check if has reservation
     if (data.reservations && data.reservations[day]) {
       dayEl.classList.add("has-reservation");
+      const resCount = data.reservations[day].length;
       dayEl.innerHTML = `
         <div style="font-weight: 600;">${day}</div>
-        <div style="font-size: 10px; margin-top: 4px;">${data.reservations[day].length}</div>
+        <div style="font-size: 10px; margin-top: 4px;">${resCount}</div>
       `;
-      dayEl.title = `${data.reservations[day].length} reservation(s) on ${monthNames[currentMonth]} ${day}`;
+      
+      // Build detailed tooltip with timing info
+      let tooltip = `${resCount} reservation(s) on ${monthNames[currentMonth]} ${day}\n\n`;
+      data.reservations[day].forEach((res, idx) => {
+        tooltip += `${idx + 1}. Slot: ${escapeHtml(res.slot)}\n`;
+        tooltip += `   Vehicle: ${escapeHtml(res.vehicle)}\n`;
+        if (res.reserved_time) {
+          tooltip += `   Reserved: ${res.reserved_time}\n`;
+        }
+        if (res.checked_in_time) {
+          tooltip += `   Checked In: ${res.checked_in_time}\n`;
+        }
+        if (res.checked_out_time) {
+          tooltip += `   Checked Out: ${res.checked_out_time}\n`;
+        }
+        tooltip += `   Status: ${res.status}\n`;
+        if (idx < data.reservations[day].length - 1) {
+          tooltip += '\n';
+        }
+      });
+      dayEl.title = tooltip;
+      
+      // Store reservation data for modal
+      dayEl.dataset.reservations = JSON.stringify(data.reservations[day]);
+      dayEl.style.cursor = "pointer";
+      
+      // Add click handler to show details
+      dayEl.addEventListener("click", (e) => {
+        e.stopPropagation();
+        showDayReservations(day, data.reservations[day], monthNames[currentMonth]);
+      });
     } else {
       dayEl.textContent = day;
     }
@@ -1458,8 +1668,248 @@ calendarModal?.addEventListener("click", (e) => {
   }
 });
 
-// Load statistics on page load (calendar loads when modal opens)
+// Day Reservations Details Modal
+function showDayReservations(day, reservations, monthName) {
+  const modal = document.getElementById("day-reservations-modal");
+  const title = document.getElementById("day-reservations-title");
+  const content = document.getElementById("day-reservations-content");
+  const closeBtn = document.getElementById("day-reservations-close-btn");
+  const closeXBtn = document.getElementById("day-reservations-close");
+  
+  title.textContent = `Reservations on ${monthName} ${day}`;
+  
+  if (!reservations || reservations.length === 0) {
+    content.innerHTML = "<p style='text-align: center; color: #64748b; padding: 20px;'>No reservations found.</p>";
+  } else {
+    content.innerHTML = reservations.map((res, idx) => {
+      let timingHtml = '';
+      if (res.reserved_time) {
+        timingHtml += `<div style="margin-bottom: 8px;">
+          <span style="font-size: 12px; color: #64748b; font-weight: 600;">📅 Reserved At:</span>
+          <span style="font-size: 14px; color: #1e293b; margin-left: 8px;">${escapeHtml(res.reserved_time)}</span>
+        </div>`;
+      }
+      if (res.checked_in_time) {
+        timingHtml += `<div style="margin-bottom: 8px;">
+          <span style="font-size: 12px; color: #10b981; font-weight: 600;">✓ Checked In:</span>
+          <span style="font-size: 14px; color: #1e293b; margin-left: 8px;">${escapeHtml(res.checked_in_time)}</span>
+        </div>`;
+      }
+      if (res.checked_out_time) {
+        timingHtml += `<div style="margin-bottom: 8px;">
+          <span style="font-size: 12px; color: #ef4444; font-weight: 600;">✗ Checked Out:</span>
+          <span style="font-size: 14px; color: #1e293b; margin-left: 8px;">${escapeHtml(res.checked_out_time)}</span>
+        </div>`;
+      }
+      
+      let statusBadge = '';
+      if (res.status === 'checked_in') {
+        statusBadge = '<span style="display: inline-block; padding: 4px 8px; border-radius: 4px; background: #d1fae5; color: #065f46; font-size: 12px; font-weight: 600;">CHECKED IN</span>';
+      } else if (res.status === 'reserved') {
+        statusBadge = '<span style="display: inline-block; padding: 4px 8px; border-radius: 4px; background: #fef3c7; color: #92400e; font-size: 12px; font-weight: 600;">RESERVED</span>';
+      } else if (res.status === 'cancelled') {
+        statusBadge = '<span style="display: inline-block; padding: 4px 8px; border-radius: 4px; background: #fee2e2; color: #991b1b; font-size: 12px; font-weight: 600;">CANCELLED</span>';
+      } else {
+        statusBadge = '<span style="display: inline-block; padding: 4px 8px; border-radius: 4px; background: #e0e7ff; color: #3730a3; font-size: 12px; font-weight: 600;">COMPLETED</span>';
+      }
+      
+      return `
+        <div style="padding: 16px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 16px; transition: background 0.3s ease, border-color 0.3s ease;" class="day-reservation-item">
+          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+            <div>
+              <div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 4px; transition: color 0.3s ease;">${escapeHtml(res.slot)}</div>
+              <div style="font-size: 14px; color: #64748b; transition: color 0.3s ease;">${escapeHtml(res.vehicle)}</div>
+            </div>
+            ${statusBadge}
+          </div>
+          <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e8f0;">
+            ${timingHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    // Add dark mode support for reservation items
+    if (document.body.classList.contains('dark-mode')) {
+      const items = content.querySelectorAll('.day-reservation-item');
+      items.forEach(item => {
+        item.style.background = '#334155';
+        item.style.borderColor = '#475569';
+        const texts = item.querySelectorAll('div');
+        texts.forEach(t => {
+          if (t.style.color === 'rgb(30, 41, 59)') t.style.color = '#f1f5f9';
+          if (t.style.color === 'rgb(100, 116, 139)') t.style.color = '#cbd5e1';
+        });
+      });
+    }
+  }
+  
+  modal.style.display = "flex";
+  
+  const closeModal = () => {
+    modal.style.display = "none";
+  };
+  
+  closeBtn.onclick = closeModal;
+  closeXBtn.onclick = closeModal;
+  modal.onclick = (e) => {
+    if (e.target === modal) closeModal();
+  };
+}
+
+// Vehicle Search Functionality
+async function loadVehiclesForSearch() {
+  try {
+    const res = await fetch(`${API}?action=vehicles`, { credentials: "include" });
+    if (!res.ok) return;
+    const vehicles = await res.json();
+    
+    const select = document.getElementById("vehicle-search-select");
+    if (!select) return;
+    
+    select.innerHTML = '<option value="">Select a vehicle...</option>';
+    vehicles.forEach(v => {
+      const option = document.createElement("option");
+      option.value = v.id;
+      option.textContent = `${v.vehicle_name} (${v.vehicle_no})`;
+      select.appendChild(option);
+    });
+  } catch (err) {
+    console.error("Failed to load vehicles for search:", err);
+  }
+}
+
+async function searchVehicleHistory() {
+  const select = document.getElementById("vehicle-search-select");
+  const vehicleId = select?.value;
+  const resultsDiv = document.getElementById("vehicle-search-results");
+  const resultsContent = document.getElementById("vehicle-search-results-content");
+  const clearBtn = document.getElementById("clear-search-btn");
+  
+  if (!vehicleId || !resultsDiv || !resultsContent) return;
+  
+  try {
+    const res = await fetch(`${API}?action=vehicle_history&vehicle_id=${vehicleId}`, { credentials: "include" });
+    if (!res.ok) {
+      await modernAlert("Failed to load vehicle history.", "Error");
+      return;
+    }
+    
+    const data = await res.json();
+    
+    if (!data.history || data.history.length === 0) {
+      resultsContent.innerHTML = '<div style="text-align: center; padding: 32px; color: #64748b;"><p>No parking history found for this vehicle.</p></div>';
+      resultsDiv.style.display = "block";
+      clearBtn.style.display = "inline-block";
+      return;
+    }
+    
+    resultsContent.innerHTML = data.history.map(item => {
+      let timingHtml = '';
+      if (item.reserved_time) {
+        timingHtml += `<div style="margin-top: 8px;">
+          <span style="font-size: 12px; color: #64748b; font-weight: 500;">📅 Reserved:</span>
+          <span style="font-size: 14px; color: #1e293b; margin-left: 8px; font-weight: 500;">${escapeHtml(item.reserved_time)}</span>
+        </div>`;
+      }
+      if (item.checked_in_time) {
+        timingHtml += `<div style="margin-top: 4px;">
+          <span style="font-size: 12px; color: #10b981; font-weight: 500;">✓ Checked In:</span>
+          <span style="font-size: 14px; color: #1e293b; margin-left: 8px; font-weight: 500;">${escapeHtml(item.checked_in_time)}</span>
+        </div>`;
+      }
+      if (item.checked_out_time) {
+        timingHtml += `<div style="margin-top: 4px;">
+          <span style="font-size: 12px; color: #ef4444; font-weight: 500;">✗ Checked Out:</span>
+          <span style="font-size: 14px; color: #1e293b; margin-left: 8px; font-weight: 500;">${escapeHtml(item.checked_out_time)}</span>
+        </div>`;
+      }
+      
+      let statusBadge = '';
+      if (item.status === 'checked_in') {
+        statusBadge = '<span style="display: inline-block; padding: 4px 8px; border-radius: 4px; background: #d1fae5; color: #065f46; font-size: 11px; font-weight: 600;">CHECKED IN</span>';
+      } else if (item.status === 'reserved') {
+        statusBadge = '<span style="display: inline-block; padding: 4px 8px; border-radius: 4px; background: #fef3c7; color: #92400e; font-size: 11px; font-weight: 600;">RESERVED</span>';
+      } else if (item.status === 'cancelled') {
+        statusBadge = '<span style="display: inline-block; padding: 4px 8px; border-radius: 4px; background: #fee2e2; color: #991b1b; font-size: 11px; font-weight: 600;">CANCELLED</span>';
+      } else {
+        statusBadge = '<span style="display: inline-block; padding: 4px 8px; border-radius: 4px; background: #e0e7ff; color: #3730a3; font-size: 11px; font-weight: 600;">COMPLETED</span>';
+      }
+      
+      return `
+        <div class="vehicle-search-result-item">
+          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+            <div>
+              <div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 4px; transition: color 0.3s ease;">${escapeHtml(item.date)}</div>
+              <div style="font-size: 14px; color: #64748b; transition: color 0.3s ease;">Slot: <strong>${escapeHtml(item.slot)}</strong></div>
+            </div>
+            ${statusBadge}
+          </div>
+          ${timingHtml}
+        </div>
+      `;
+    }).join('');
+    
+    // Apply dark mode styles if needed
+    if (document.body.classList.contains('dark-mode')) {
+      const items = resultsContent.querySelectorAll('.vehicle-search-result-item');
+      items.forEach(item => {
+        const texts = item.querySelectorAll('div');
+        texts.forEach(t => {
+          if (t.style.color === 'rgb(30, 41, 59)') t.style.color = '#f1f5f9';
+          if (t.style.color === 'rgb(100, 116, 139)') t.style.color = '#cbd5e1';
+        });
+      });
+    }
+    
+    resultsDiv.style.display = "block";
+    clearBtn.style.display = "inline-block";
+  } catch (err) {
+    console.error("Failed to search vehicle history:", err);
+    await modernAlert("Network error. Please try again.", "Error");
+  }
+}
+
+function clearVehicleSearch() {
+  const select = document.getElementById("vehicle-search-select");
+  const resultsDiv = document.getElementById("vehicle-search-results");
+  const clearBtn = document.getElementById("clear-search-btn");
+  
+  if (select) select.value = "";
+  if (resultsDiv) resultsDiv.style.display = "none";
+  if (clearBtn) clearBtn.style.display = "none";
+}
+
+document.getElementById("search-vehicle-btn")?.addEventListener("click", searchVehicleHistory);
+document.getElementById("clear-search-btn")?.addEventListener("click", clearVehicleSearch);
+document.getElementById("vehicle-search-select")?.addEventListener("keypress", (e) => {
+  if (e.key === 'Enter') {
+    searchVehicleHistory();
+  }
+});
+
+// Auto-release expired reservations (check every minute)
+setInterval(async () => {
+  try {
+    await fetch(`${API}?action=auto_release`, {
+      method: "POST",
+      credentials: "include"
+    });
+    // Silently reload page if we have a reservation that might have expired
+    const cancelBtn = document.getElementById("cancel");
+    const checkinBtn = document.getElementById("checkin");
+    const checkoutBtn = document.getElementById("checkout");
+    if (cancelBtn || checkinBtn || checkoutBtn) {
+      location.reload();
+    }
+  } catch (err) {
+    // Silently fail - auto-release will try again next interval
+  }
+}, 60000); // Check every 60 seconds
+
+// Load statistics and vehicles on page load (calendar loads when modal opens)
 loadStatistics();
+loadVehiclesForSearch();
 </script>
 
 </body>

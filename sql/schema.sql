@@ -46,11 +46,17 @@ CREATE TABLE IF NOT EXISTS reservations (
   slot_id INT NOT NULL,
   reservation_name VARCHAR(100) NULL,
   user_id INT NOT NULL,
+  vehicle_id INT NULL,
   vehicle_no VARCHAR(20) NULL,
   status ENUM('reserved','checked_in') DEFAULT 'reserved',
+  reservation_start_time DATETIME NULL,
+  reservation_end_time DATETIME NULL,
+  checked_in_at DATETIME NULL,
   reserved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_res_slot (slot_id),
-  UNIQUE KEY uq_res_user (user_id)
+  UNIQUE KEY uq_res_user (user_id),
+  INDEX idx_reservation_end_time (reservation_end_time),
+  FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL
 );
 
 -- activity logs
@@ -61,6 +67,33 @@ CREATE TABLE IF NOT EXISTS activity_logs (
   details TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- reservation_history: PERMANENT history of all reservations (only deleted when user account is deleted)
+-- This table stores complete parking history with dates, slots, timings, and vehicle information
+-- IMPORTANT: History is permanent and persists even after slots are released/cancelled
+CREATE TABLE IF NOT EXISTS reservation_history (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  reservation_id INT NOT NULL,
+  user_id INT NOT NULL,
+  slot_id INT NOT NULL,
+  vehicle_id INT NULL,
+  vehicle_no VARCHAR(20) NULL,
+  reservation_name VARCHAR(100) NULL,
+  status ENUM('reserved','checked_in','cancelled','completed') DEFAULT 'reserved',
+  reserved_at DATETIME NOT NULL,
+  reservation_start_time DATETIME NULL,
+  reservation_end_time DATETIME NULL,
+  checked_in_at DATETIME NULL,
+  checked_out_at DATETIME NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_user_id (user_id),
+  INDEX idx_reservation_id (reservation_id),
+  INDEX idx_reserved_at (reserved_at),
+  INDEX idx_status (status),
+  INDEX idx_vehicle_id (vehicle_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (slot_id) REFERENCES parking_slots(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- seed data
 INSERT IGNORE INTO roles (id, name) VALUES (1,'admin'),(2,'user');

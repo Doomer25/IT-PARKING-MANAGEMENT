@@ -272,6 +272,20 @@ require_once __DIR__ . '/../src/db.php';
               <option value="">Loading vehicles...</option>
             </select>
           </div>
+          <div class="form-group" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
+            <label style="font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 12px; display: block;">⏰ Reservation Timing</label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <div>
+                <label for="reserve-start-time" style="font-size: 12px; color: #64748b; margin-bottom: 6px; display: block;">Check-in Time</label>
+                <input type="datetime-local" id="reserve-start-time" required style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; background: #ffffff;">
+              </div>
+              <div>
+                <label for="reserve-end-time" style="font-size: 12px; color: #64748b; margin-bottom: 6px; display: block;">Check-out Time</label>
+                <input type="datetime-local" id="reserve-end-time" required style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; background: #ffffff;">
+              </div>
+            </div>
+            <p style="font-size: 11px; color: #64748b; margin-top: 8px; line-height: 1.4;">Note: Slot will be automatically released after check-out time.</p>
+          </div>
           <div class="modal-actions">
             <button type="button" id="reserve-cancel" class="btn-modal btn-cancel">Cancel</button>
             <button type="submit" class="btn-modal btn-confirm">
@@ -544,6 +558,8 @@ require_once __DIR__ . '/../src/db.php';
   const reserveLabel      = document.getElementById("reserve-slot-label");
   const inputName         = document.getElementById("reserve-name");
   const inputVehicle      = document.getElementById("reserve-vehicle"); // This is now a select dropdown
+  const inputStartTime    = document.getElementById("reserve-start-time");
+  const inputEndTime      = document.getElementById("reserve-end-time");
   const formReserve       = document.getElementById("reserve-form");
   const btnReserveCancel  = document.getElementById("reserve-cancel");
 
@@ -793,6 +809,44 @@ require_once __DIR__ . '/../src/db.php';
     reserveLabel.textContent = "You are reserving: " + CURRENT_SLOT_LABEL;
     inputName.value = "";
     
+    // Set default times (now and 2 hours from now)
+    const now = new Date();
+    const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+    
+    // Format for datetime-local input (YYYY-MM-DDTHH:mm)
+    const formatDateTime = (date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return `${year}-${month}-${day}T${hours}:${minutes}`;
+    };
+    
+    if (inputStartTime) {
+      inputStartTime.value = formatDateTime(now);
+      inputStartTime.min = formatDateTime(now); // Can't select past time
+    }
+    if (inputEndTime) {
+      inputEndTime.value = formatDateTime(twoHoursLater);
+      inputEndTime.min = formatDateTime(now); // Can't select past time
+    }
+    
+    // Update end time minimum when start time changes
+    if (inputStartTime && inputEndTime) {
+      inputStartTime.addEventListener('change', () => {
+        if (inputStartTime.value) {
+          const startDate = new Date(inputStartTime.value);
+          inputEndTime.min = formatDateTime(startDate);
+          // If end time is before new start time, update it
+          if (inputEndTime.value && new Date(inputEndTime.value) <= startDate) {
+            const newEndTime = new Date(startDate.getTime() + 2 * 60 * 60 * 1000);
+            inputEndTime.value = formatDateTime(newEndTime);
+          }
+        }
+      });
+    }
+    
     // Load vehicles for dropdown
     inputVehicle.innerHTML = '<option value="">Loading...</option>';
     
@@ -841,8 +895,22 @@ require_once __DIR__ . '/../src/db.php';
       }
       const name = inputName.value.trim();
       const vehicleId = inputVehicle.value;
+      const startTime = inputStartTime?.value;
+      const endTime = inputEndTime?.value;
+      
       if (!name || !vehicleId) {
         showToast("Please enter name & select a vehicle.");
+        return;
+      }
+      
+      if (!startTime || !endTime) {
+        showToast("Please select check-in and check-out times.");
+        return;
+      }
+      
+      // Validate that end time is after start time
+      if (new Date(endTime) <= new Date(startTime)) {
+        showToast("Check-out time must be after check-in time.");
         return;
       }
 
@@ -851,7 +919,9 @@ require_once __DIR__ . '/../src/db.php';
         const res = await apiPost("reserve", {
           slot_svg_id: CURRENT_SLOT_ID,
           name: name,
-          vehicle_id: parseInt(vehicleId)
+          vehicle_id: parseInt(vehicleId),
+          reservation_start_time: startTime,
+          reservation_end_time: endTime
         });
         const body = await res.json();
         if (!res.ok) {
@@ -1317,6 +1387,20 @@ require_once __DIR__ . '/../src/db.php';
     await refreshSlots();
     highlightFromHash();
     setInterval(refreshSlots, 5000);
+    
+    // Auto-release expired reservations (check every minute)
+    setInterval(async () => {
+      try {
+        await fetch(`${API}?action=auto_release`, {
+          method: "POST",
+          credentials: "include"
+        });
+        // Silently refresh slots after auto-release
+        refreshSlots();
+      } catch (err) {
+        // Silently fail - auto-release will try again next interval
+      }
+    }, 60000); // Check every 60 seconds
   })();
 
 })();
