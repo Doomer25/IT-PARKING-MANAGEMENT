@@ -222,7 +222,6 @@ require_once __DIR__ . '/../src/db.php';
     <h1>🚗 IT Department Parking</h1>
     <div class="header-actions">
       <a href="/IT-PARKING-MANAGEMENT/public/index.php" class="btn btn-secondary">Dashboard</a>
-      <a href="/IT-PARKING-MANAGEMENT/public/logout.php" class="btn btn-primary">Logout</a>
     </div>
   </div>
 

@@ -238,18 +238,31 @@ try {
         }
 
         // Create Reservation (use vehicle_id if available)
+        $reservationId = null;
         if ($vehicle_id > 0) {
             $stmt = $pdo->prepare("
                 INSERT INTO reservations (slot_id, reservation_name, user_id, vehicle_id, vehicle_no, status, reserved_at)
                 VALUES (?, ?, ?, ?, ?, 'reserved', NOW())
             ");
             $stmt->execute([$slotId, $reservation_name, $userId, $vehicle_id, $vehicle_no]);
+            $reservationId = $pdo->lastInsertId();
         } else {
             $stmt = $pdo->prepare("
                 INSERT INTO reservations (slot_id, reservation_name, user_id, vehicle_no, status, reserved_at)
                 VALUES (?, ?, ?, ?, 'reserved', NOW())
             ");
             $stmt->execute([$slotId, $reservation_name, $userId, $vehicle_no]);
+            $reservationId = $pdo->lastInsertId();
+        }
+
+        // Also insert into reservation_history for tracking
+        if ($reservationId) {
+            $stmt = $pdo->prepare("
+                INSERT INTO reservation_history (reservation_id, user_id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'reserved', NOW(), NOW())
+            ");
+            $vehicleIdForHistory = $vehicle_id > 0 ? $vehicle_id : null;
+            $stmt->execute([$reservationId, $userId, $slotId, $vehicleIdForHistory, $vehicle_no, $reservation_name]);
         }
 
         $pdo->commit();
@@ -261,8 +274,27 @@ try {
     // CHECK-IN
     // ============================
     if ($action === 'checkin' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $uid = current_user_id();
+        
+        // Get reservation ID before updating
+        $stmt = $pdo->prepare("SELECT id FROM reservations WHERE user_id = ?");
+        $stmt->execute([$uid]);
+        $reservation = $stmt->fetch();
+        
+        // Update active reservation
         $stmt = $pdo->prepare("UPDATE reservations SET status='checked_in' WHERE user_id=?");
-        $stmt->execute([current_user_id()]);
+        $stmt->execute([$uid]);
+        
+        // Update reservation_history
+        if ($reservation) {
+            $stmt = $pdo->prepare("
+                UPDATE reservation_history 
+                SET status = 'checked_in'
+                WHERE reservation_id = ? AND status != 'completed'
+            ");
+            $stmt->execute([$reservation['id']]);
+        }
+        
         echo json_encode(['success' => true]);
         exit;
     }
@@ -271,8 +303,26 @@ try {
     // CANCEL RESERVATION
     // ============================
     if ($action === 'cancel' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $uid = current_user_id();
+        
+        // Get reservation details before deleting
+        $stmt = $pdo->prepare("SELECT id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at FROM reservations WHERE user_id = ?");
+        $stmt->execute([$uid]);
+        $reservation = $stmt->fetch();
+        
+        if ($reservation) {
+            // Update reservation_history with check-out time
+            $stmt = $pdo->prepare("
+                UPDATE reservation_history 
+                SET checked_out_at = NOW(), status = 'cancelled'
+                WHERE reservation_id = ? AND checked_out_at IS NULL
+            ");
+            $stmt->execute([$reservation['id']]);
+        }
+        
+        // Delete from active reservations
         $stmt = $pdo->prepare("DELETE FROM reservations WHERE user_id=?");
-        $stmt->execute([current_user_id()]);
+        $stmt->execute([$uid]);
         echo json_encode(['success' => true]);
         exit;
     }
@@ -516,6 +566,181 @@ try {
             http_response_code(500);
             echo json_encode(['error' => 'Failed to delete user: ' . $e->getMessage()]);
         }
+        exit;
+    }
+
+    // ============================
+    // GET RESERVATION STATISTICS
+    // ============================
+    if ($action === 'stats' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $uid = current_user_id();
+        if (!$uid) {
+            http_response_code(401);
+            echo json_encode(['error' => 'Not authenticated']);
+            exit;
+        }
+
+        // Total reservations (all time) - from history table if available, else active
+        try {
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM reservation_history WHERE user_id = ?");
+            $stmt->execute([$uid]);
+            $totalReservations = $stmt->fetchColumn();
+            if ($totalReservations == 0) {
+                $stmt = $pdo->prepare("SELECT COUNT(*) FROM reservations WHERE user_id = ?");
+                $stmt->execute([$uid]);
+                $totalReservations = $stmt->fetchColumn();
+            }
+        } catch (Exception $e) {
+            // If reservation_history table doesn't exist yet, use active reservations
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM reservations WHERE user_id = ?");
+            $stmt->execute([$uid]);
+            $totalReservations = $stmt->fetchColumn();
+        }
+
+        // Current month reservations
+        try {
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*) FROM reservation_history
+                WHERE user_id = ? 
+                AND MONTH(reserved_at) = MONTH(CURRENT_DATE())
+                AND YEAR(reserved_at) = YEAR(CURRENT_DATE())
+            ");
+            $stmt->execute([$uid]);
+            $currentMonthReservations = $stmt->fetchColumn();
+            if ($currentMonthReservations == 0) {
+                $stmt = $pdo->prepare("
+                    SELECT COUNT(*) FROM reservations 
+                    WHERE user_id = ? 
+                    AND MONTH(reserved_at) = MONTH(CURRENT_DATE())
+                    AND YEAR(reserved_at) = YEAR(CURRENT_DATE())
+                ");
+                $stmt->execute([$uid]);
+                $currentMonthReservations = $stmt->fetchColumn();
+            }
+        } catch (Exception $e) {
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*) FROM reservations 
+                WHERE user_id = ? 
+                AND MONTH(reserved_at) = MONTH(CURRENT_DATE())
+                AND YEAR(reserved_at) = YEAR(CURRENT_DATE())
+            ");
+            $stmt->execute([$uid]);
+            $currentMonthReservations = $stmt->fetchColumn();
+        }
+
+        // Most used vehicle
+        $stmt = $pdo->prepare("
+            SELECT v.vehicle_name, v.vehicle_no, COUNT(*) as usage_count
+            FROM reservations r
+            LEFT JOIN vehicles v ON v.id = r.vehicle_id
+            WHERE r.user_id = ? AND r.vehicle_id IS NOT NULL
+            GROUP BY v.id, v.vehicle_name, v.vehicle_no
+            ORDER BY usage_count DESC
+            LIMIT 1
+        ");
+        $stmt->execute([$uid]);
+        $mostUsedVehicle = $stmt->fetch();
+        
+        // If no vehicle-based reservation, try vehicle_no
+        if (!$mostUsedVehicle) {
+            $stmt = $pdo->prepare("
+                SELECT vehicle_no, COUNT(*) as usage_count
+                FROM reservations
+                WHERE user_id = ? AND vehicle_no IS NOT NULL
+                GROUP BY vehicle_no
+                ORDER BY usage_count DESC
+                LIMIT 1
+            ");
+            $stmt->execute([$uid]);
+            $vehicleNo = $stmt->fetch();
+            if ($vehicleNo) {
+                $mostUsedVehicle = ['vehicle_name' => '', 'vehicle_no' => $vehicleNo['vehicle_no']];
+            }
+        }
+
+        // Average duration (if we track check-out times in history table)
+        try {
+            $stmt = $pdo->prepare("
+                SELECT AVG(TIMESTAMPDIFF(HOUR, reserved_at, checked_out_at)) as avg_hours
+                FROM reservation_history
+                WHERE user_id = ? AND checked_out_at IS NOT NULL
+            ");
+            $stmt->execute([$uid]);
+            $avgDuration = $stmt->fetchColumn();
+        } catch (Exception $e) {
+            $avgDuration = null;
+        }
+
+        $vehicleDisplay = '-';
+        if ($mostUsedVehicle) {
+            if (!empty($mostUsedVehicle['vehicle_name'])) {
+                $vehicleDisplay = $mostUsedVehicle['vehicle_name'] . ' (' . $mostUsedVehicle['vehicle_no'] . ')';
+            } else {
+                $vehicleDisplay = $mostUsedVehicle['vehicle_no'];
+            }
+        }
+
+        echo json_encode([
+            'total_reservations' => (int)$totalReservations,
+            'current_month' => (int)$currentMonthReservations,
+            'most_used_vehicle' => $vehicleDisplay,
+            'average_duration' => $avgDuration ? round($avgDuration, 1) . ' hrs' : '-'
+        ]);
+        exit;
+    }
+
+    // ============================
+    // GET RESERVATION CALENDAR DATA
+    // ============================
+    if ($action === 'calendar' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $uid = current_user_id();
+        if (!$uid) {
+            http_response_code(401);
+            echo json_encode(['error' => 'Not authenticated']);
+            exit;
+        }
+
+        $year = intval($_GET['year'] ?? date('Y'));
+        $month = intval($_GET['month'] ?? date('m'));
+
+        // Get all reservations for the month
+        $stmt = $pdo->prepare("
+            SELECT 
+                DAY(reserved_at) as day,
+                p.slot_number,
+                p.label,
+                v.vehicle_name,
+                r.status
+            FROM reservations r
+            LEFT JOIN parking_slots p ON p.id = r.slot_id
+            LEFT JOIN vehicles v ON v.id = r.vehicle_id
+            WHERE r.user_id = ?
+            AND MONTH(reserved_at) = ?
+            AND YEAR(reserved_at) = ?
+            ORDER BY day ASC
+        ");
+        $stmt->execute([$uid, $month, $year]);
+        $reservations = $stmt->fetchAll();
+
+        // Format reservations by day
+        $calendarData = [];
+        foreach ($reservations as $res) {
+            $day = (int)$res['day'];
+            if (!isset($calendarData[$day])) {
+                $calendarData[$day] = [];
+            }
+            $calendarData[$day][] = [
+                'slot' => $res['slot_number'] ?? $res['label'] ?? 'N/A',
+                'vehicle' => $res['vehicle_name'] ?? 'N/A',
+                'status' => $res['status']
+            ];
+        }
+
+        echo json_encode([
+            'year' => $year,
+            'month' => $month,
+            'reservations' => $calendarData
+        ]);
         exit;
     }
 
