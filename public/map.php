@@ -1121,8 +1121,11 @@ require_once __DIR__ . '/../src/db.php';
         const userType = t.dataset.userType || "N/A";
         const reservationName = t.dataset.reservationName || "N/A";
         const vehicleNo = t.dataset.vehicleNo || "N/A";
+        const vehicleName = t.dataset.vehicleName || null;
         const reservedAt = t.dataset.reservedAt || "N/A";
         const status = t.dataset.resStatus || "reserved";
+        
+        const vehicleDisplay = vehicleName ? `${escapeHtml(vehicleName)} (${escapeHtml(vehicleNo)})` : escapeHtml(vehicleNo);
         
         adminSlotContent.innerHTML = `
           <div style="margin-bottom: 20px;">
