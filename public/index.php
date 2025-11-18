@@ -14,12 +14,16 @@ $stmt = $pdo->prepare("
         r.status,
         r.reserved_at,
         r.vehicle_no,
+        r.vehicle_id,
         r.reservation_name,
         p.svg_id,
         p.slot_number,
-        p.slot_type
+        p.slot_type,
+        v.vehicle_name,
+        v.vehicle_image
     FROM reservations r
     JOIN parking_slots p ON p.id = r.slot_id
+    LEFT JOIN vehicles v ON v.id = r.vehicle_id
     WHERE r.user_id = ?
     ORDER BY r.reserved_at DESC
     LIMIT 1
@@ -42,10 +46,38 @@ $reservedSlot = $stmt->fetch();
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       min-height: 100vh;
       padding: 20px;
       color: #1e293b;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-image: url('/IT-PARKING-MANAGEMENT/public/assets/building-background.jpg');
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      filter: blur(8px);
+      transform: scale(1.1);
+      z-index: -2;
+    }
+
+    body::after {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.1);
+      z-index: -1;
     }
 
     .header {
@@ -85,7 +117,7 @@ $reservedSlot = $stmt->fetch();
     }
 
     .btn-primary {
-      background: #ffffff;
+      background: rgb(230, 216, 247);
       color: #667eea;
     }
 
@@ -97,17 +129,16 @@ $reservedSlot = $stmt->fetch();
     }
 
     .btn-secondary {
-      background: rgba(255,255,255,0.2);
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: #ffffff;
-      backdrop-filter: blur(10px);
+      box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
     }
 
     .btn-secondary:hover {
-      background: rgba(255,255,255,0.3) !important;
-      box-shadow: 0 0 30px rgba(255, 255, 255, 0.8), 0 0 60px rgba(255, 255, 255, 0.5), 0 4px 12px rgba(0,0,0,0.15) !important;
-      outline: 2px solid rgba(255, 255, 255, 0.6) !important;
-      outline-offset: 4px !important;
       transform: translateY(-2px);
+      box-shadow: 0 0 30px rgba(102, 126, 234, 1), 0 0 60px rgba(102, 126, 234, 0.6), 0 4px 12px rgba(0,0,0,0.15) !important;
+      outline: 2px solid rgba(102, 126, 234, 0.5) !important;
+      outline-offset: 4px !important;
     }
 
     .btn-danger {
@@ -140,7 +171,7 @@ $reservedSlot = $stmt->fetch();
     }
 
     .modern-modal {
-      background: #ffffff;
+      background: rgb(230, 216, 247);
       border-radius: 16px;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
       max-width: 480px;
@@ -271,7 +302,7 @@ $reservedSlot = $stmt->fetch();
     }
 
     .card {
-      background: #ffffff;
+      background: rgb(230, 216, 247);
       padding: 32px;
       border-radius: 16px;
       max-width: 1000px;
@@ -306,7 +337,7 @@ $reservedSlot = $stmt->fetch();
     }
 
     .status-card {
-      background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
+      background: linear-gradient(135deg, rgb(240, 232, 250) 0%, rgb(230, 216, 247) 100%);
       padding: 24px;
       border-radius: 12px;
       border: 2px solid #e2e8f0;
@@ -651,7 +682,7 @@ $reservedSlot = $stmt->fetch();
 
     .vehicle-search-result-item {
       padding: 16px;
-      background: white;
+      background: rgb(230, 216, 247);
       border-radius: 8px;
       border: 1px solid #e2e8f0;
       transition: all 0.2s;
@@ -716,7 +747,7 @@ $reservedSlot = $stmt->fetch();
       padding: 8px;
       border: 2px solid #e2e8f0;
       border-radius: 8px;
-      background: #ffffff;
+      background: rgb(230, 216, 247);
       cursor: pointer;
       transition: all 0.2s;
       font-size: 14px;
@@ -777,9 +808,9 @@ $reservedSlot = $stmt->fetch();
   <div class="header">
     <h1>👋 Welcome, <?= htmlspecialchars($username) ?></h1>
     <div class="header-actions">
-      <button id="calendarBtn" class="btn btn-secondary" style="background: rgba(255,255,255,0.2); color: #ffffff; border: none; cursor: pointer; backdrop-filter: blur(10px);">📅 Reservation Calendar</button>
+      <button id="calendarBtn" class="btn btn-secondary">📅 Reservation Calendar</button>
       <a class="btn btn-secondary" href="/IT-PARKING-MANAGEMENT/public/map.php">🗺️ Open Map</a>
-      <button id="settingsBtn" class="btn btn-secondary" style="background: rgba(255,255,255,0.2); color: #ffffff; border: none; cursor: pointer; backdrop-filter: blur(10px);">⚙️ Settings</button>
+      <button id="settingsBtn" class="btn btn-secondary">⚙️ Settings</button>
     </div>
   </div>
 
@@ -805,7 +836,7 @@ $reservedSlot = $stmt->fetch();
               </div>
               <div id="add-vehicle-form" style="padding: 16px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
                 <h4 style="font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #334155;">Add New Vehicle</h4>
-                <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; margin-bottom: 12px;">
                   <div>
                     <label style="font-size: 12px; color: #64748b; margin-bottom: 4px; display: block;">Vehicle Name</label>
                     <input type="text" id="new-vehicle-name" placeholder="e.g., My Car" style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
@@ -815,6 +846,11 @@ $reservedSlot = $stmt->fetch();
                     <input type="text" id="new-vehicle-no" placeholder="e.g., ABC-1234" style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
                   </div>
                   <button id="add-vehicle-submit" class="btn-action" style="padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 500;">Add</button>
+                </div>
+                <div>
+                  <label style="font-size: 12px; color: #64748b; margin-bottom: 4px; display: block;">Vehicle Image (Optional)</label>
+                  <input type="file" id="new-vehicle-image" accept="image/*" style="width: 100%; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
+                  <p style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Max 5MB. Formats: JPEG, PNG, GIF, WebP</p>
                 </div>
               </div>
             </div>
@@ -861,9 +897,19 @@ $reservedSlot = $stmt->fetch();
             <span class="info-label">Parking Slot</span>
             <span class="info-value"><?= htmlspecialchars($reservedSlot['slot_number'] ?? $reservedSlot['svg_id']) ?></span>
           </div>
+          <?php if (!empty($reservedSlot['vehicle_image'])): ?>
+          <div class="info-item" style="grid-column: 1 / -1;">
+            <span class="info-label">Vehicle Image</span>
+            <div style="margin-top: 8px;">
+              <img src="/IT-PARKING-MANAGEMENT/public/assets/vehicle_images/<?= htmlspecialchars($reservedSlot['vehicle_image']) ?>" 
+                   alt="Vehicle" 
+                   style="max-width: 300px; max-height: 200px; border-radius: 8px; border: 2px solid #e2e8f0; object-fit: cover;">
+            </div>
+          </div>
+          <?php endif; ?>
           <div class="info-item">
-            <span class="info-label">Name</span>
-            <span class="info-value"><?= htmlspecialchars($reservedSlot['reservation_name']) ?></span>
+            <span class="info-label">Vehicle Name</span>
+            <span class="info-value"><?= htmlspecialchars($reservedSlot['vehicle_name'] ?? 'N/A') ?></span>
           </div>
           <div class="info-item">
             <span class="info-label">Vehicle Number</span>
@@ -920,23 +966,23 @@ $reservedSlot = $stmt->fetch();
     </div>
 
     <!-- Statistics Dashboard -->
-    <div class="stats-dashboard" style="margin-top: 32px; padding: 24px; background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%); border-radius: 12px; border: 2px solid #e2e8f0; transition: background 0.3s ease, border-color 0.3s ease;">
+    <div class="stats-dashboard" style="margin-top: 32px; padding: 24px; background: linear-gradient(135deg, rgb(240, 232, 250) 0%, rgb(230, 216, 247) 100%); border-radius: 12px; border: 2px solid #e2e8f0; transition: background 0.3s ease, border-color 0.3s ease;">
       <h3 style="font-size: 20px; font-weight: 600; color: #1e293b; margin-bottom: 24px; transition: color 0.3s ease;">📊 Statistics Dashboard</h3>
       <div id="stats-content" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px;">
         <!-- Stats will be loaded here -->
-        <div style="text-align: center; padding: 20px; background: white; border-radius: 8px; border: 1px solid #e2e8f0;">
+        <div style="text-align: center; padding: 20px; background: rgb(230, 216, 247); border-radius: 8px; border: 1px solid #e2e8f0;">
           <div style="font-size: 32px; font-weight: 700; color: #667eea; margin-bottom: 8px;" id="total-reservations">0</div>
           <div style="font-size: 14px; color: #64748b;">Total Reservations</div>
         </div>
-        <div style="text-align: center; padding: 20px; background: white; border-radius: 8px; border: 1px solid #e2e8f0;">
+        <div style="text-align: center; padding: 20px; background: rgb(230, 216, 247); border-radius: 8px; border: 1px solid #e2e8f0;">
           <div style="font-size: 32px; font-weight: 700; color: #10b981; margin-bottom: 8px;" id="current-month-reservations">0</div>
           <div style="font-size: 14px; color: #64748b;">This Month</div>
         </div>
-        <div style="text-align: center; padding: 20px; background: white; border-radius: 8px; border: 1px solid #e2e8f0;">
+        <div style="text-align: center; padding: 20px; background: rgb(230, 216, 247); border-radius: 8px; border: 1px solid #e2e8f0;">
           <div style="font-size: 24px; font-weight: 600; color: #f59e0b; margin-bottom: 8px;" id="most-used-vehicle">-</div>
           <div style="font-size: 14px; color: #64748b;">Most Used Vehicle</div>
         </div>
-        <div style="text-align: center; padding: 20px; background: white; border-radius: 8px; border: 1px solid #e2e8f0;">
+        <div style="text-align: center; padding: 20px; background: rgb(230, 216, 247); border-radius: 8px; border: 1px solid #e2e8f0;">
           <div style="font-size: 32px; font-weight: 700; color: #8b5cf6; margin-bottom: 8px;" id="average-duration">-</div>
           <div style="font-size: 14px; color: #64748b;">Avg. Duration (hrs)</div>
         </div>
@@ -948,7 +994,7 @@ $reservedSlot = $stmt->fetch();
         <div style="display: flex; gap: 12px; align-items: end; margin-bottom: 20px; flex-wrap: wrap;">
           <div style="flex: 1; min-width: 200px;">
             <label style="font-size: 12px; color: #64748b; margin-bottom: 6px; display: block; font-weight: 500;">Select Vehicle</label>
-            <select id="vehicle-search-select" style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; background: white; color: #1e293b; cursor: pointer; transition: all 0.2s;">
+            <select id="vehicle-search-select" style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; background: rgb(230, 216, 247); color: #1e293b; cursor: pointer; transition: all 0.2s;">
               <option value="">Select a vehicle...</option>
             </select>
           </div>
@@ -1354,18 +1400,38 @@ async function loadVehicles() {
       return;
     }
     
-    vehiclesList.innerHTML = vehicles.map(v => `
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: white; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 8px;">
-        <div>
-          <div style="font-weight: 600; color: #1e293b; margin-bottom: 4px;">${escapeHtml(v.vehicle_name)}</div>
-          <div style="font-size: 13px; color: #64748b;">${escapeHtml(v.vehicle_no)}</div>
+    vehiclesList.innerHTML = vehicles.map(v => {
+      const imageHtml = v.vehicle_image ? 
+        `<img src="/IT-PARKING-MANAGEMENT/public/assets/vehicle_images/${escapeHtml(v.vehicle_image)}" 
+              alt="${escapeHtml(v.vehicle_name)}" 
+              style="width: 60px; height: 60px; object-fit: cover; border-radius: 6px; border: 2px solid #e2e8f0; margin-right: 12px;">` : 
+        `<div style="width: 60px; height: 60px; background: #f1f5f9; border-radius: 6px; border: 2px solid #e2e8f0; margin-right: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px;">🚗</div>`;
+      return `
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgb(230, 216, 247); border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 8px;">
+        <div style="display: flex; align-items: center;">
+          ${imageHtml}
+          <div>
+            <div style="font-weight: 600; color: #1e293b; margin-bottom: 4px;">${escapeHtml(v.vehicle_name)}</div>
+            <div style="font-size: 13px; color: #64748b;">${escapeHtml(v.vehicle_no)}</div>
+          </div>
         </div>
-        <button onclick="deleteVehicle(${v.id}, '${escapeHtml(v.vehicle_name, true)}')" 
-                style="background: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500;">
-          Delete
-        </button>
+        <div style="display: flex; gap: 8px;">
+          <button onclick="editVehicleImage(${v.id})" 
+                  style="background: #667eea; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500;">
+            ${v.vehicle_image ? 'Change' : 'Add'} Image
+          </button>
+          ${v.vehicle_image ? `<button onclick="deleteVehicleImage(${v.id})" 
+                  style="background: #f59e0b; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500;">
+            Delete Image
+          </button>` : ''}
+          <button onclick="deleteVehicle(${v.id}, '${escapeHtml(v.vehicle_name, true)}')" 
+                  style="background: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500;">
+            Delete
+          </button>
+        </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
     
     // Hide add form if at max (3 vehicles)
     if (vehicles.length >= 3) {
@@ -1382,6 +1448,7 @@ async function loadVehicles() {
 async function addVehicle() {
   const name = newVehicleName.value.trim();
   const no = newVehicleNo.value.trim();
+  const imageFile = document.getElementById("new-vehicle-image")?.files[0];
   
   if (!name || !no) {
     await modernAlert("Please enter vehicle name and number.", "Required Field");
@@ -1392,17 +1459,25 @@ async function addVehicle() {
   addVehicleSubmit.textContent = "Adding...";
   
   try {
+    const formData = new FormData();
+    formData.append('vehicle_name', name);
+    formData.append('vehicle_no', no);
+    if (imageFile) {
+      formData.append('vehicle_image', imageFile);
+    }
+    
     const res = await fetch(`${API}?action=add_vehicle`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ vehicle_name: name, vehicle_no: no })
+      body: formData
     });
     const data = await res.json();
     
     if (res.ok) {
       newVehicleName.value = "";
       newVehicleNo.value = "";
+      const imageInput = document.getElementById("new-vehicle-image");
+      if (imageInput) imageInput.value = "";
       await loadVehicles();
       await modernAlert("Vehicle added successfully!", "Success");
     } else {
@@ -1413,6 +1488,69 @@ async function addVehicle() {
   } finally {
     addVehicleSubmit.disabled = false;
     addVehicleSubmit.textContent = "Add";
+  }
+}
+
+async function editVehicleImage(vehicleId) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const formData = new FormData();
+    formData.append('vehicle_id', vehicleId);
+    formData.append('vehicle_image', file);
+    
+    try {
+      const res = await fetch(`${API}?action=update_vehicle_image`, {
+        method: "POST",
+        credentials: "include",
+        body: formData
+      });
+      const data = await res.json();
+      
+      if (res.ok) {
+        await loadVehicles();
+        await modernAlert("Vehicle image updated successfully!", "Success");
+      } else {
+        await modernAlert("Error: " + (data.error || "Failed to update image"), "Error");
+      }
+    } catch (err) {
+      await modernAlert("Network error. Please try again.", "Error");
+    }
+  };
+  input.click();
+}
+
+async function deleteVehicleImage(vehicleId) {
+  const confirmed = await modernConfirm(
+    "Are you sure you want to delete this vehicle image? This will not affect parking history.",
+    "Delete Image"
+  );
+  if (!confirmed) return;
+  
+  try {
+    const formData = new FormData();
+    formData.append('vehicle_id', vehicleId);
+    formData.append('delete_image', '1');
+    
+    const res = await fetch(`${API}?action=update_vehicle_image`, {
+      method: "POST",
+      credentials: "include",
+      body: formData
+    });
+    const data = await res.json();
+    
+    if (res.ok) {
+      await loadVehicles();
+      await modernAlert("Vehicle image deleted successfully!", "Success");
+    } else {
+      await modernAlert("Error: " + (data.error || "Failed to delete image"), "Error");
+    }
+  } catch (err) {
+    await modernAlert("Network error. Please try again.", "Error");
   }
 }
 
@@ -1492,13 +1630,22 @@ newVehicleNo?.addEventListener("keypress", (e) => {
 async function loadStatistics() {
   try {
     const res = await fetch(`${API}?action=stats`, { credentials: "include" });
-    if (!res.ok) return;
+    if (!res.ok) {
+      console.error("Statistics API error:", res.status);
+      return;
+    }
     const stats = await res.json();
     
-    document.getElementById("total-reservations").textContent = stats.total_reservations || 0;
-    document.getElementById("current-month-reservations").textContent = stats.current_month || 0;
-    document.getElementById("most-used-vehicle").textContent = stats.most_used_vehicle || '-';
-    document.getElementById("average-duration").textContent = stats.average_duration || '-';
+    // Update statistics only if elements exist
+    const totalEl = document.getElementById("total-reservations");
+    const monthEl = document.getElementById("current-month-reservations");
+    const vehicleEl = document.getElementById("most-used-vehicle");
+    const durationEl = document.getElementById("average-duration");
+    
+    if (totalEl) totalEl.textContent = stats.total_reservations ?? 0;
+    if (monthEl) monthEl.textContent = stats.current_month ?? 0;
+    if (vehicleEl) vehicleEl.textContent = stats.most_used_vehicle || '-';
+    if (durationEl) durationEl.textContent = stats.average_duration || '-';
   } catch (err) {
     console.error("Failed to load statistics:", err);
   }
@@ -1836,6 +1983,20 @@ async function searchVehicleHistory() {
         statusBadge = '<span style="display: inline-block; padding: 4px 8px; border-radius: 4px; background: #e0e7ff; color: #3730a3; font-size: 11px; font-weight: 600;">COMPLETED</span>';
       }
       
+      // Vehicle info display
+      let vehicleInfoHtml = '';
+      if (item.vehicle_name || item.vehicle_no) {
+        vehicleInfoHtml = `<div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e8f0;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            ${item.vehicle_image ? `<img src="/IT-PARKING-MANAGEMENT/public/assets/vehicle_images/${escapeHtml(item.vehicle_image)}" alt="Vehicle" style="width: 60px; height: 60px; object-fit: cover; border-radius: 8px; border: 2px solid #e2e8f0;">` : ''}
+            <div>
+              ${item.vehicle_name ? `<div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 2px;">${escapeHtml(item.vehicle_name)}</div>` : ''}
+              ${item.vehicle_no ? `<div style="font-size: 12px; color: #64748b;">${escapeHtml(item.vehicle_no)}</div>` : ''}
+            </div>
+          </div>
+        </div>`;
+      }
+      
       return `
         <div class="vehicle-search-result-item">
           <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
@@ -1846,6 +2007,7 @@ async function searchVehicleHistory() {
             ${statusBadge}
           </div>
           ${timingHtml}
+          ${vehicleInfoHtml}
         </div>
       `;
     }).join('');
@@ -1888,24 +2050,38 @@ document.getElementById("vehicle-search-select")?.addEventListener("keypress", (
   }
 });
 
-// Auto-release expired reservations (check every minute)
-setInterval(async () => {
+// Auto-release expired reservations function
+async function checkAndAutoRelease() {
   try {
-    await fetch(`${API}?action=auto_release`, {
+    const res = await fetch(`${API}?action=auto_release`, {
       method: "POST",
       credentials: "include"
     });
-    // Silently reload page if we have a reservation that might have expired
-    const cancelBtn = document.getElementById("cancel");
-    const checkinBtn = document.getElementById("checkin");
-    const checkoutBtn = document.getElementById("checkout");
-    if (cancelBtn || checkinBtn || checkoutBtn) {
-      location.reload();
+    
+    if (res.ok) {
+      const data = await res.json();
+      // Only reload if something was actually released AND we have an active reservation
+      if (data.released_count > 0) {
+        const cancelBtn = document.getElementById("cancel");
+        const checkinBtn = document.getElementById("checkin");
+        const checkoutBtn = document.getElementById("checkout");
+        // Only reload if we had a reservation (one of these buttons existed)
+        if (cancelBtn || checkinBtn || checkoutBtn) {
+          location.reload();
+        }
+      }
     }
   } catch (err) {
     // Silently fail - auto-release will try again next interval
+    console.error("Auto-release check failed:", err);
   }
-}, 60000); // Check every 60 seconds
+}
+
+// Check immediately on page load (but delay slightly to let page finish loading)
+setTimeout(checkAndAutoRelease, 1000);
+
+// Then check every minute
+setInterval(checkAndAutoRelease, 60000); // Check every 60 seconds
 
 // Load statistics and vehicles on page load (calendar loads when modal opens)
 loadStatistics();

@@ -14,11 +14,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Collect vehicles (up to 3)
     $vehicles = [];
+    $uploadDir = __DIR__ . '/assets/vehicle_images/';
+    if (!is_dir($uploadDir)) {
+        mkdir($uploadDir, 0755, true);
+    }
+    
     for ($i = 1; $i <= 3; $i++) {
         $vehicle_name = trim($_POST["vehicle_name_$i"] ?? '');
         $vehicle_no = trim($_POST["vehicle_no_$i"] ?? '');
         if ($vehicle_name !== '' && $vehicle_no !== '') {
-            $vehicles[] = ['name' => $vehicle_name, 'number' => $vehicle_no];
+            $vehicle_image = null;
+            
+            // Handle image upload for this vehicle
+            if (isset($_FILES["vehicle_image_$i"]) && $_FILES["vehicle_image_$i"]['error'] === UPLOAD_ERR_OK) {
+                $file = $_FILES["vehicle_image_$i"];
+                $allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+                $maxSize = 5 * 1024 * 1024; // 5MB
+                
+                if (in_array($file['type'], $allowedTypes) && $file['size'] <= $maxSize) {
+                    $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
+                    $filename = 'vehicle_' . time() . '_' . $i . '_' . uniqid() . '.' . $extension;
+                    $filepath = $uploadDir . $filename;
+                    
+                    if (move_uploaded_file($file['tmp_name'], $filepath)) {
+                        $vehicle_image = $filename;
+                    }
+                }
+            }
+            
+            $vehicles[] = ['name' => $vehicle_name, 'number' => $vehicle_no, 'image' => $vehicle_image];
         }
     }
 
@@ -55,11 +79,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Insert vehicles
                 $stmt = $pdo->prepare("
-                    INSERT INTO vehicles (user_id, vehicle_name, vehicle_no, created_at)
-                    VALUES (?, ?, ?, NOW())
+                    INSERT INTO vehicles (user_id, vehicle_name, vehicle_no, vehicle_image, created_at)
+                    VALUES (?, ?, ?, ?, NOW())
                 ");
                 foreach ($vehicles as $vehicle) {
-                    $stmt->execute([$user_id, $vehicle['name'], $vehicle['number']]);
+                    $stmt->execute([$user_id, $vehicle['name'], $vehicle['number'], $vehicle['image']]);
                 }
 
                 $pdo->commit();
@@ -91,16 +115,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 20px;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-image: url('/IT-PARKING-MANAGEMENT/public/assets/building-background.jpg');
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      filter: blur(8px);
+      transform: scale(1.1);
+      z-index: -2;
+    }
+
+    body::after {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.1);
+      z-index: -1;
     }
 
     .card {
-      background: #ffffff;
+      background: rgb(230, 216, 247);
       padding: 40px;
       border-radius: 16px;
       max-width: 520px;
@@ -146,7 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       font-size: 14px;
       transition: all 0.2s;
       font-family: inherit;
-      background: #ffffff;
+      background: rgb(230, 216, 247);
     }
 
     .form-group input:focus,
@@ -260,7 +312,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       </div>
     <?php endif; ?>
 
-    <form method="post">
+    <form method="post" enctype="multipart/form-data">
       <div class="form-group">
         <label for="name">Full Name</label>
         <input type="text" id="name" name="name" required 
@@ -297,7 +349,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <label style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">Vehicles (Add up to 3)</label>
         <div id="vehicles-container">
           <div class="vehicle-item" style="margin-bottom: 16px; padding: 16px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
               <div>
                 <label style="font-size: 12px; color: #64748b; margin-bottom: 4px; display: block;">Vehicle Name</label>
                 <input type="text" name="vehicle_name_1" placeholder="e.g., My Car" style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
@@ -306,6 +358,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <label style="font-size: 12px; color: #64748b; margin-bottom: 4px; display: block;">Vehicle Number</label>
                 <input type="text" name="vehicle_no_1" placeholder="e.g., ABC-1234" style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
               </div>
+            </div>
+            <div>
+              <label style="font-size: 12px; color: #64748b; margin-bottom: 4px; display: block;">Vehicle Image (Optional)</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="file" name="vehicle_image_1" accept="image/*" id="vehicle_image_1" style="flex: 1; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
+                <button type="button" onclick="clearImage('vehicle_image_1')" style="padding: 8px 12px; background: #f59e0b; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; white-space: nowrap;">Clear</button>
+              </div>
+              <p style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Max 5MB. Formats: JPEG, PNG, GIF, WebP</p>
             </div>
           </div>
         </div>
@@ -335,7 +395,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           item.style.cssText = 'margin-bottom: 16px; padding: 16px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; position: relative;';
           item.innerHTML = `
             <button type="button" class="remove-vehicle" style="position: absolute; top: 8px; right: 8px; background: #ef4444; color: white; border: none; width: 24px; height: 24px; border-radius: 4px; cursor: pointer; font-size: 16px; line-height: 1;">×</button>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
               <div>
                 <label style="font-size: 12px; color: #64748b; margin-bottom: 4px; display: block;">Vehicle Name</label>
                 <input type="text" name="vehicle_name_${vehicleCount}" placeholder="e.g., My Car" style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
@@ -344,6 +404,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <label style="font-size: 12px; color: #64748b; margin-bottom: 4px; display: block;">Vehicle Number</label>
                 <input type="text" name="vehicle_no_${vehicleCount}" placeholder="e.g., ABC-1234" style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
               </div>
+            </div>
+            <div>
+              <label style="font-size: 12px; color: #64748b; margin-bottom: 4px; display: block;">Vehicle Image (Optional)</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="file" name="vehicle_image_${vehicleCount}" accept="image/*" id="vehicle_image_${vehicleCount}" style="flex: 1; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
+                <button type="button" onclick="clearImage('vehicle_image_${vehicleCount}')" style="padding: 8px 12px; background: #f59e0b; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; white-space: nowrap;">Clear</button>
+              </div>
+              <p style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Max 5MB. Formats: JPEG, PNG, GIF, WebP</p>
             </div>
           `;
           
@@ -372,6 +440,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
           }
         });
+        
+        // Function to clear image input
+        window.clearImage = function(inputId) {
+          const input = document.getElementById(inputId);
+          if (input) {
+            input.value = '';
+          }
+        };
       </script>
     </form>
 

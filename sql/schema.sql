@@ -68,6 +68,18 @@ CREATE TABLE IF NOT EXISTS activity_logs (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- vehicles
+CREATE TABLE IF NOT EXISTS vehicles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  vehicle_name VARCHAR(100) NOT NULL,
+  vehicle_no VARCHAR(20) NOT NULL,
+  vehicle_image VARCHAR(255) NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_user_id (user_id)
+);
+
 -- reservation_history: PERMANENT history of all reservations (only deleted when user account is deleted)
 -- This table stores complete parking history with dates, slots, timings, and vehicle information
 -- IMPORTANT: History is permanent and persists even after slots are released/cancelled
@@ -78,6 +90,8 @@ CREATE TABLE IF NOT EXISTS reservation_history (
   slot_id INT NOT NULL,
   vehicle_id INT NULL,
   vehicle_no VARCHAR(20) NULL,
+  vehicle_name VARCHAR(100) NULL,
+  vehicle_image VARCHAR(255) NULL,
   reservation_name VARCHAR(100) NULL,
   status ENUM('reserved','checked_in','cancelled','completed') DEFAULT 'reserved',
   reserved_at DATETIME NOT NULL,

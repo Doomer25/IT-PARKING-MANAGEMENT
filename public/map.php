@@ -22,10 +22,38 @@ require_once __DIR__ . '/../src/db.php';
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       min-height: 100vh;
       padding: 20px;
       color: #1e293b;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-image: url('/IT-PARKING-MANAGEMENT/public/assets/building-background.jpg');
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      filter: blur(8px);
+      transform: scale(1.1);
+      z-index: -2;
+    }
+
+    body::after {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.1);
+      z-index: -1;
     }
 
     .header {
@@ -67,7 +95,7 @@ require_once __DIR__ . '/../src/db.php';
     }
 
     .btn-primary {
-      background: #ffffff;
+      background: rgb(230, 216, 247);
       color: #667eea;
     }
 
@@ -78,22 +106,22 @@ require_once __DIR__ . '/../src/db.php';
     }
 
     .btn-secondary {
-      background: rgba(255,255,255,0.2);
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: #ffffff;
-      backdrop-filter: blur(10px);
+      box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
     }
 
     .btn-secondary:hover {
-      background: rgba(255,255,255,0.3) !important;
-      box-shadow: 0 0 30px rgba(255, 255, 255, 0.8), 0 0 60px rgba(255, 255, 255, 0.5), 0 4px 12px rgba(0,0,0,0.15) !important;
-      outline: 2px solid rgba(255, 255, 255, 0.6) !important;
+      transform: translateY(-2px);
+      box-shadow: 0 0 30px rgba(102, 126, 234, 1), 0 0 60px rgba(102, 126, 234, 0.6), 0 4px 12px rgba(0,0,0,0.15) !important;
+      outline: 2px solid rgba(102, 126, 234, 0.5) !important;
       outline-offset: 4px !important;
     }
 
     .map-wrap {
       max-width: 1200px;
       margin: 0 auto;
-      background: #ffffff;
+      background: rgb(230, 216, 247);
       padding: 32px;
       border-radius: 16px;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);
@@ -263,12 +291,8 @@ require_once __DIR__ . '/../src/db.php';
         <p id="reserve-slot-label" class="modal-subtitle"></p>
         <form id="reserve-form">
           <div class="form-group">
-            <label for="reserve-name">Your Name</label>
-            <input type="text" id="reserve-name" required placeholder="Enter your full name" autocomplete="name">
-          </div>
-          <div class="form-group">
             <label for="reserve-vehicle">Select Vehicle</label>
-            <select id="reserve-vehicle" required style="width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; background: #ffffff;">
+            <select id="reserve-vehicle" required style="width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; background: rgb(230, 216, 247);">
               <option value="">Loading vehicles...</option>
             </select>
           </div>
@@ -277,11 +301,11 @@ require_once __DIR__ . '/../src/db.php';
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
               <div>
                 <label for="reserve-start-time" style="font-size: 12px; color: #64748b; margin-bottom: 6px; display: block;">Check-in Time</label>
-                <input type="datetime-local" id="reserve-start-time" required style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; background: #ffffff;">
+                <input type="datetime-local" id="reserve-start-time" required style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; background: rgb(230, 216, 247);">
               </div>
               <div>
                 <label for="reserve-end-time" style="font-size: 12px; color: #64748b; margin-bottom: 6px; display: block;">Check-out Time</label>
-                <input type="datetime-local" id="reserve-end-time" required style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; background: #ffffff;">
+                <input type="datetime-local" id="reserve-end-time" required style="width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; background: rgb(230, 216, 247);">
               </div>
             </div>
             <p style="font-size: 11px; color: #64748b; margin-top: 8px; line-height: 1.4;">Note: Slot will be automatically released after check-out time.</p>
@@ -362,7 +386,7 @@ require_once __DIR__ . '/../src/db.php';
     }
 
     .modal-content {
-      background: #ffffff;
+      background: rgb(230, 216, 247);
       padding: 0;
       border-radius: 16px;
       width: 100%;
@@ -556,7 +580,6 @@ require_once __DIR__ . '/../src/db.php';
   // modal elements
   const reserveModal      = document.getElementById("reserve-modal");
   const reserveLabel      = document.getElementById("reserve-slot-label");
-  const inputName         = document.getElementById("reserve-name");
   const inputVehicle      = document.getElementById("reserve-vehicle"); // This is now a select dropdown
   const inputStartTime    = document.getElementById("reserve-start-time");
   const inputEndTime      = document.getElementById("reserve-end-time");
@@ -803,11 +826,16 @@ require_once __DIR__ . '/../src/db.php';
 
   // ------- Reservation Modal Helpers -------
   async function openReserveModal(svgId, labelText) {
+    if (!reserveModal || !reserveLabel || !inputVehicle) {
+      console.error("Modal elements not found");
+      showToast("Error: Modal elements not loaded", true);
+      return;
+    }
+    
     CURRENT_SLOT_ID = svgId;
     CURRENT_SLOT_LABEL = labelText || svgId;
 
     reserveLabel.textContent = "You are reserving: " + CURRENT_SLOT_LABEL;
-    inputName.value = "";
     
     // Set default times (now and 2 hours from now)
     const now = new Date();
@@ -876,8 +904,13 @@ require_once __DIR__ . '/../src/db.php';
       inputVehicle.disabled = true;
     }
     
-    reserveModal.classList.add("show");
-    setTimeout(() => inputName.focus(), 100);
+    // Show the modal
+    if (reserveModal) {
+      reserveModal.classList.add("show");
+    } else {
+      console.error("reserveModal element not found");
+      showToast("Error: Reservation modal not found", true);
+    }
   }
 
   function closeReserveModal() {
@@ -893,13 +926,12 @@ require_once __DIR__ . '/../src/db.php';
         showToast("No slot selected.");
         return;
       }
-      const name = inputName.value.trim();
       const vehicleId = inputVehicle.value;
       const startTime = inputStartTime?.value;
       const endTime = inputEndTime?.value;
       
-      if (!name || !vehicleId) {
-        showToast("Please enter name & select a vehicle.");
+      if (!vehicleId) {
+        showToast("Please select a vehicle.");
         return;
       }
       
@@ -918,7 +950,6 @@ require_once __DIR__ . '/../src/db.php';
       try {
         const res = await apiPost("reserve", {
           slot_svg_id: CURRENT_SLOT_ID,
-          name: name,
           vehicle_id: parseInt(vehicleId),
           reservation_start_time: startTime,
           reservation_end_time: endTime
@@ -1174,7 +1205,13 @@ require_once __DIR__ . '/../src/db.php';
       // Get label for display
       const titleText = t.title || "";
       const label = titleText.split(" —")[0].trim() || slotLabel || t.id;
-      openReserveModal(t.id, label);
+      
+      // Prevent event bubbling
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Open the reservation modal
+      await openReserveModal(t.id, label);
       return;
     }
 
@@ -1388,8 +1425,8 @@ require_once __DIR__ . '/../src/db.php';
     highlightFromHash();
     setInterval(refreshSlots, 5000);
     
-    // Auto-release expired reservations (check every minute)
-    setInterval(async () => {
+    // Auto-release expired reservations function
+    async function checkAndAutoRelease() {
       try {
         await fetch(`${API}?action=auto_release`, {
           method: "POST",
@@ -1400,7 +1437,13 @@ require_once __DIR__ . '/../src/db.php';
       } catch (err) {
         // Silently fail - auto-release will try again next interval
       }
-    }, 60000); // Check every 60 seconds
+    }
+    
+    // Check immediately on page load
+    checkAndAutoRelease();
+    
+    // Then check every minute
+    setInterval(checkAndAutoRelease, 60000); // Check every 60 seconds
   })();
 
 })();

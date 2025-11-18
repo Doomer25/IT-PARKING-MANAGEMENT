@@ -43,10 +43,38 @@ $reservations = $stmt->fetchAll();
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       min-height: 100vh;
       padding: 20px;
       color: #1e293b;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-image: url('/IT-PARKING-MANAGEMENT/public/assets/building-background.jpg');
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      filter: blur(8px);
+      transform: scale(1.1);
+      z-index: -2;
+    }
+
+    body::after {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.1);
+      z-index: -1;
     }
 
     .header {
@@ -91,9 +119,16 @@ $reservations = $stmt->fetchAll();
     }
 
     .btn-secondary {
-      background: rgba(255,255,255,0.2);
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: #ffffff;
-      backdrop-filter: blur(10px);
+      box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    }
+
+    .btn-secondary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 30px rgba(102, 126, 234, 1), 0 0 60px rgba(102, 126, 234, 0.6), 0 4px 12px rgba(0,0,0,0.15) !important;
+      outline: 2px solid rgba(102, 126, 234, 0.5) !important;
+      outline-offset: 4px !important;
     }
 
     .btn-danger {
@@ -114,7 +149,7 @@ $reservations = $stmt->fetchAll();
     }
 
     .card {
-      background: #ffffff;
+      background: rgb(230, 216, 247);
       padding: 32px;
       border-radius: 16px;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);

@@ -108,22 +108,32 @@ try {
 
         $data = json_decode(file_get_contents('php://input'), true) ?? [];
         $slot_svg_id = trim($data['slot_svg_id'] ?? '');
-        $reservation_name = trim($data['name'] ?? '');
+        $reservation_name = trim($data['name'] ?? ''); // Optional, will use user's name if not provided
         $vehicle_id = intval($data['vehicle_id'] ?? 0);
         $reservation_start_time = trim($data['reservation_start_time'] ?? '');
         $reservation_end_time = trim($data['reservation_end_time'] ?? '');
         $vehicle_no = trim($data['vehicle_no'] ?? ''); // Fallback for backwards compatibility
 
-        if ($slot_svg_id === '' || $reservation_name === '') {
+        if ($slot_svg_id === '') {
             http_response_code(400);
-            echo json_encode(['error' => 'Name and slot are required']);
+            echo json_encode(['error' => 'Slot is required']);
             exit;
+        }
+        
+        // If reservation_name is not provided, use user's name
+        if ($reservation_name === '') {
+            $stmt = $pdo->prepare("SELECT name FROM users WHERE id = ?");
+            $stmt->execute([$userId]);
+            $user = $stmt->fetch();
+            $reservation_name = $user['name'] ?? 'User';
         }
 
         // If vehicle_id is provided, use it; otherwise fallback to vehicle_no
+        $vehicle_name = null;
+        $vehicle_image = null;
         if ($vehicle_id > 0) {
-            // Verify vehicle belongs to user
-            $stmt = $pdo->prepare("SELECT vehicle_no, vehicle_name FROM vehicles WHERE id = ? AND user_id = ?");
+            // Verify vehicle belongs to user and get vehicle details
+            $stmt = $pdo->prepare("SELECT vehicle_no, vehicle_name, vehicle_image FROM vehicles WHERE id = ? AND user_id = ?");
             $stmt->execute([$vehicle_id, $userId]);
             $vehicle = $stmt->fetch();
             if (!$vehicle) {
@@ -132,6 +142,8 @@ try {
                 exit;
             }
             $vehicle_no = $vehicle['vehicle_no'];
+            $vehicle_name = $vehicle['vehicle_name'];
+            $vehicle_image = $vehicle['vehicle_image'];
         } elseif ($vehicle_no === '') {
             http_response_code(400);
             echo json_encode(['error' => 'Vehicle is required']);
@@ -288,11 +300,11 @@ try {
         if ($reservationId) {
             try {
                 $stmt = $pdo->prepare("
-                    INSERT INTO reservation_history (reservation_id, user_id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at, reservation_start_time, reservation_end_time, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, 'reserved', NOW(), ?, ?, NOW())
+                    INSERT INTO reservation_history (reservation_id, user_id, slot_id, vehicle_id, vehicle_no, vehicle_name, vehicle_image, reservation_name, status, reserved_at, reservation_start_time, reservation_end_time, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reserved', NOW(), ?, ?, NOW())
                 ");
                 $vehicleIdForHistory = $vehicle_id > 0 ? $vehicle_id : null;
-                $stmt->execute([$reservationId, $userId, $slotId, $vehicleIdForHistory, $vehicle_no, $reservation_name, $reservation_start_time, $reservation_end_time]);
+                $stmt->execute([$reservationId, $userId, $slotId, $vehicleIdForHistory, $vehicle_no, $vehicle_name, $vehicle_image, $reservation_name, $reservation_start_time, $reservation_end_time]);
             } catch (Exception $e) {
                 // If reservation_history table doesn't exist yet, continue (will be created by SQL)
                 // Log error but don't fail the reservation
@@ -356,6 +368,19 @@ try {
             if ($reservation) {
                 $reservationId = $reservation['id'];
                 
+                // Get vehicle name and image if vehicle_id exists
+                $vehicle_name = null;
+                $vehicle_image = null;
+                if ($reservation['vehicle_id']) {
+                    $stmt = $pdo->prepare("SELECT vehicle_name, vehicle_image FROM vehicles WHERE id = ?");
+                    $stmt->execute([$reservation['vehicle_id']]);
+                    $vehicle = $stmt->fetch();
+                    if ($vehicle) {
+                        $vehicle_name = $vehicle['vehicle_name'];
+                        $vehicle_image = $vehicle['vehicle_image'];
+                    }
+                }
+                
                 // Ensure reservation_history entry exists (create if not exists, update if exists)
                 try {
                     // Check if history entry exists
@@ -376,8 +401,8 @@ try {
                         // IMPORTANT: Use the actual reserved_at from reservation, not NOW()
                         $stmt = $pdo->prepare("
                             INSERT INTO reservation_history 
-                            (reservation_id, user_id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at, checked_in_at, checked_out_at, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, 'cancelled', ?, ?, NOW(), NOW())
+                            (reservation_id, user_id, slot_id, vehicle_id, vehicle_no, vehicle_name, vehicle_image, reservation_name, status, reserved_at, checked_in_at, checked_out_at, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cancelled', ?, ?, NOW(), NOW())
                         ");
                         $stmt->execute([
                             $reservationId,
@@ -385,6 +410,8 @@ try {
                             $reservation['slot_id'],
                             $reservation['vehicle_id'],
                             $reservation['vehicle_no'],
+                            $vehicle_name,
+                            $vehicle_image,
                             $reservation['reservation_name'],
                             $reservation['reserved_at'],
                             $reservation['checked_in_at']
@@ -412,6 +439,193 @@ try {
     }
 
     // ============================
+    // CHECK-OUT
+    // ============================
+    if ($action === 'checkout' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $uid = current_user_id();
+        
+        $pdo->beginTransaction();
+        try {
+            // Get reservation details before deleting
+            $stmt = $pdo->prepare("SELECT id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at, checked_in_at FROM reservations WHERE user_id = ?");
+            $stmt->execute([$uid]);
+            $reservation = $stmt->fetch();
+            
+            if (!$reservation) {
+                $pdo->rollBack();
+                http_response_code(404);
+                echo json_encode(['error' => 'No active reservation found']);
+                exit;
+            }
+            
+            $reservationId = $reservation['id'];
+            
+            // Get vehicle name and image if vehicle_id exists
+            $vehicle_name = null;
+            $vehicle_image = null;
+            if ($reservation['vehicle_id']) {
+                $stmt = $pdo->prepare("SELECT vehicle_name, vehicle_image FROM vehicles WHERE id = ?");
+                $stmt->execute([$reservation['vehicle_id']]);
+                $vehicle = $stmt->fetch();
+                if ($vehicle) {
+                    $vehicle_name = $vehicle['vehicle_name'];
+                    $vehicle_image = $vehicle['vehicle_image'];
+                }
+            }
+            
+            // Ensure reservation_history entry exists and update with check-out time
+            try {
+                // Check if history entry exists
+                $stmt = $pdo->prepare("SELECT id FROM reservation_history WHERE reservation_id = ?");
+                $stmt->execute([$reservationId]);
+                $historyExists = $stmt->fetch();
+                
+                if ($historyExists) {
+                    // Update existing history entry with check-out time and mark as completed
+                    $stmt = $pdo->prepare("
+                        UPDATE reservation_history 
+                        SET checked_out_at = NOW(), status = 'completed'
+                        WHERE reservation_id = ? AND checked_out_at IS NULL
+                    ");
+                    $stmt->execute([$reservationId]);
+                } else {
+                    // Create history entry if it doesn't exist
+                    $stmt = $pdo->prepare("
+                        INSERT INTO reservation_history 
+                        (reservation_id, user_id, slot_id, vehicle_id, vehicle_no, vehicle_name, vehicle_image, reservation_name, status, reserved_at, checked_in_at, checked_out_at, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, NOW(), NOW())
+                    ");
+                    $stmt->execute([
+                        $reservationId,
+                        $uid,
+                        $reservation['slot_id'],
+                        $reservation['vehicle_id'],
+                        $reservation['vehicle_no'],
+                        $vehicle_name,
+                        $vehicle_image,
+                        $reservation['reservation_name'],
+                        $reservation['reserved_at'],
+                        $reservation['checked_in_at']
+                    ]);
+                }
+            } catch (Exception $e) {
+                // If reservation_history table doesn't exist, log error but continue
+                error_log("Failed to save reservation history on checkout: " . $e->getMessage());
+            }
+            
+            // Delete from active reservations (after saving to history)
+            $stmt = $pdo->prepare("DELETE FROM reservations WHERE user_id=?");
+            $stmt->execute([$uid]);
+            
+            $pdo->commit();
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            http_response_code(500);
+            echo json_encode(['error' => 'Failed to check out: ' . $e->getMessage()]);
+        }
+        exit;
+    }
+
+    // ============================
+    // AUTO-RELEASE EXPIRED RESERVATIONS
+    // ============================
+    if ($action === 'auto_release' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        // This endpoint can be called without authentication (for cron jobs)
+        // But we'll still check if user is authenticated for security
+        $uid = current_user_id();
+        
+        $pdo->beginTransaction();
+        try {
+            // Find all reservations where reservation_end_time has passed
+            // Only process reservations that are still active (not already checked out)
+            $stmt = $pdo->prepare("
+                SELECT id, user_id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at, checked_in_at, reservation_end_time
+                FROM reservations
+                WHERE reservation_end_time IS NOT NULL 
+                AND reservation_end_time <= NOW()
+                AND status IN ('reserved', 'checked_in')
+            ");
+            $stmt->execute();
+            $expiredReservations = $stmt->fetchAll();
+            
+            $releasedCount = 0;
+            
+            foreach ($expiredReservations as $reservation) {
+                $reservationId = $reservation['id'];
+                $userId = $reservation['user_id'];
+                
+                // Get vehicle name and image if vehicle_id exists
+                $vehicle_name = null;
+                $vehicle_image = null;
+                if ($reservation['vehicle_id']) {
+                    $stmt = $pdo->prepare("SELECT vehicle_name, vehicle_image FROM vehicles WHERE id = ?");
+                    $stmt->execute([$reservation['vehicle_id']]);
+                    $vehicle = $stmt->fetch();
+                    if ($vehicle) {
+                        $vehicle_name = $vehicle['vehicle_name'];
+                        $vehicle_image = $vehicle['vehicle_image'];
+                    }
+                }
+                
+                // Ensure reservation_history entry exists and update with check-out time
+                try {
+                    // Check if history entry exists
+                    $stmt = $pdo->prepare("SELECT id FROM reservation_history WHERE reservation_id = ?");
+                    $stmt->execute([$reservationId]);
+                    $historyExists = $stmt->fetch();
+                    
+                    if ($historyExists) {
+                        // Update existing history entry with check-out time and mark as completed
+                        $stmt = $pdo->prepare("
+                            UPDATE reservation_history 
+                            SET checked_out_at = NOW(), status = 'completed'
+                            WHERE reservation_id = ? AND checked_out_at IS NULL
+                        ");
+                        $stmt->execute([$reservationId]);
+                    } else {
+                        // Create history entry if it doesn't exist
+                        $stmt = $pdo->prepare("
+                            INSERT INTO reservation_history 
+                            (reservation_id, user_id, slot_id, vehicle_id, vehicle_no, vehicle_name, vehicle_image, reservation_name, status, reserved_at, checked_in_at, checked_out_at, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, NOW(), NOW())
+                        ");
+                        $stmt->execute([
+                            $reservationId,
+                            $userId,
+                            $reservation['slot_id'],
+                            $reservation['vehicle_id'],
+                            $reservation['vehicle_no'],
+                            $vehicle_name,
+                            $vehicle_image,
+                            $reservation['reservation_name'],
+                            $reservation['reserved_at'],
+                            $reservation['checked_in_at']
+                        ]);
+                    }
+                } catch (Exception $e) {
+                    // If reservation_history table doesn't exist, log error but continue
+                    error_log("Failed to save reservation history on auto-release: " . $e->getMessage());
+                }
+                
+                // Delete from active reservations (after saving to history)
+                $stmt = $pdo->prepare("DELETE FROM reservations WHERE id = ?");
+                $stmt->execute([$reservationId]);
+                
+                $releasedCount++;
+            }
+            
+            $pdo->commit();
+            echo json_encode(['success' => true, 'released_count' => $releasedCount]);
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            http_response_code(500);
+            echo json_encode(['error' => 'Failed to auto-release: ' . $e->getMessage()]);
+        }
+        exit;
+    }
+
+    // ============================
     // GET USER VEHICLES
     // ============================
     if ($action === 'vehicles' && $_SERVER['REQUEST_METHOD'] === 'GET') {
@@ -422,7 +636,7 @@ try {
             exit;
         }
 
-        $stmt = $pdo->prepare("SELECT id, vehicle_name, vehicle_no, created_at FROM vehicles WHERE user_id = ? ORDER BY created_at ASC");
+        $stmt = $pdo->prepare("SELECT id, vehicle_name, vehicle_no, vehicle_image, created_at FROM vehicles WHERE user_id = ? ORDER BY created_at ASC");
         $stmt->execute([$uid]);
         echo json_encode($stmt->fetchAll());
         exit;
@@ -439,7 +653,50 @@ try {
             exit;
         }
 
-        $data = json_decode(file_get_contents('php://input'), true) ?? [];
+        // Handle file upload if present
+        $vehicle_image = null;
+        if (isset($_FILES['vehicle_image']) && $_FILES['vehicle_image']['error'] === UPLOAD_ERR_OK) {
+            $uploadDir = __DIR__ . '/assets/vehicle_images/';
+            if (!is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+            
+            $file = $_FILES['vehicle_image'];
+            $allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+            $maxSize = 5 * 1024 * 1024; // 5MB
+            
+            if (!in_array($file['type'], $allowedTypes)) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Invalid image type. Allowed: JPEG, PNG, GIF, WebP']);
+                exit;
+            }
+            
+            if ($file['size'] > $maxSize) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Image too large. Maximum 5MB']);
+                exit;
+            }
+            
+            $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
+            $filename = 'vehicle_' . $uid . '_' . time() . '_' . uniqid() . '.' . $extension;
+            $filepath = $uploadDir . $filename;
+            
+            if (move_uploaded_file($file['tmp_name'], $filepath)) {
+                $vehicle_image = $filename;
+            } else {
+                http_response_code(500);
+                echo json_encode(['error' => 'Failed to upload image']);
+                exit;
+            }
+        }
+        
+        // Get data from POST or JSON
+        if (isset($_FILES['vehicle_image']) || isset($_POST['vehicle_name'])) {
+            $data = $_POST;
+        } else {
+            $data = json_decode(file_get_contents('php://input'), true) ?? [];
+        }
+        
         $vehicle_name = trim($data['vehicle_name'] ?? '');
         $vehicle_no = trim($data['vehicle_no'] ?? '');
 
@@ -460,12 +717,131 @@ try {
         }
 
         $stmt = $pdo->prepare("
-            INSERT INTO vehicles (user_id, vehicle_name, vehicle_no, created_at)
-            VALUES (?, ?, ?, NOW())
+            INSERT INTO vehicles (user_id, vehicle_name, vehicle_no, vehicle_image, created_at)
+            VALUES (?, ?, ?, ?, NOW())
         ");
-        $stmt->execute([$uid, $vehicle_name, $vehicle_no]);
+        $stmt->execute([$uid, $vehicle_name, $vehicle_no, $vehicle_image]);
         
         echo json_encode(['success' => true, 'id' => $pdo->lastInsertId()]);
+        exit;
+    }
+
+    // ============================
+    // UPDATE VEHICLE IMAGE
+    // ============================
+    if ($action === 'update_vehicle_image' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $uid = current_user_id();
+        if (!$uid) {
+            http_response_code(401);
+            echo json_encode(['error' => 'Not authenticated']);
+            exit;
+        }
+
+        $vehicle_id = intval($_POST['vehicle_id'] ?? 0);
+        if ($vehicle_id <= 0) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid vehicle ID']);
+            exit;
+        }
+
+        // Verify vehicle belongs to user
+        $stmt = $pdo->prepare("SELECT vehicle_image FROM vehicles WHERE id = ? AND user_id = ?");
+        $stmt->execute([$vehicle_id, $uid]);
+        $vehicle = $stmt->fetch();
+        if (!$vehicle) {
+            http_response_code(404);
+            echo json_encode(['error' => 'Vehicle not found']);
+            exit;
+        }
+
+        // Check if this is a delete request
+        $delete_image = isset($_POST['delete_image']) && $_POST['delete_image'] === '1';
+        
+        if ($delete_image) {
+            // Check if image is used in reservation_history before deleting
+            if ($vehicle['vehicle_image']) {
+                $uploadDir = __DIR__ . '/assets/vehicle_images/';
+                $oldImagePath = $uploadDir . $vehicle['vehicle_image'];
+                
+                // Check if this image is referenced in any reservation_history entries
+                $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM reservation_history WHERE vehicle_image = ?");
+                $stmt->execute([$vehicle['vehicle_image']]);
+                $historyCount = $stmt->fetch();
+                
+                // Only delete file if not used in history (preserve for historical records)
+                if ($historyCount['count'] == 0 && file_exists($oldImagePath)) {
+                    unlink($oldImagePath);
+                }
+            }
+            
+            // Update vehicle to remove image (but keep file if used in history)
+            $stmt = $pdo->prepare("UPDATE vehicles SET vehicle_image = NULL WHERE id = ? AND user_id = ?");
+            $stmt->execute([$vehicle_id, $uid]);
+            
+            echo json_encode(['success' => true, 'image' => null]);
+            exit;
+        }
+
+        // Handle file upload
+        $vehicle_image = null;
+        if (isset($_FILES['vehicle_image']) && $_FILES['vehicle_image']['error'] === UPLOAD_ERR_OK) {
+            $uploadDir = __DIR__ . '/assets/vehicle_images/';
+            if (!is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+            
+            $file = $_FILES['vehicle_image'];
+            $allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+            $maxSize = 5 * 1024 * 1024; // 5MB
+            
+            if (!in_array($file['type'], $allowedTypes)) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Invalid image type. Allowed: JPEG, PNG, GIF, WebP']);
+                exit;
+            }
+            
+            if ($file['size'] > $maxSize) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Image too large. Maximum 5MB']);
+                exit;
+            }
+            
+            // Check if old image is used in reservation_history before deleting
+            if ($vehicle['vehicle_image']) {
+                $oldImagePath = $uploadDir . $vehicle['vehicle_image'];
+                // Check if this image is referenced in any reservation_history entries
+                $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM reservation_history WHERE vehicle_image = ?");
+                $stmt->execute([$vehicle['vehicle_image']]);
+                $historyCount = $stmt->fetch();
+                
+                // Only delete if not used in history (preserve for historical records)
+                if ($historyCount['count'] == 0 && file_exists($oldImagePath)) {
+                    unlink($oldImagePath);
+                }
+            }
+            
+            $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
+            $filename = 'vehicle_' . $uid . '_' . time() . '_' . uniqid() . '.' . $extension;
+            $filepath = $uploadDir . $filename;
+            
+            if (move_uploaded_file($file['tmp_name'], $filepath)) {
+                $vehicle_image = $filename;
+            } else {
+                http_response_code(500);
+                echo json_encode(['error' => 'Failed to upload image']);
+                exit;
+            }
+        } else {
+            http_response_code(400);
+            echo json_encode(['error' => 'No image file provided']);
+            exit;
+        }
+
+        // Update vehicle image
+        $stmt = $pdo->prepare("UPDATE vehicles SET vehicle_image = ? WHERE id = ? AND user_id = ?");
+        $stmt->execute([$vehicle_image, $vehicle_id, $uid]);
+        
+        echo json_encode(['success' => true, 'image' => $vehicle_image]);
         exit;
     }
 
@@ -614,6 +990,19 @@ try {
                 $reservationId = $reservation['id'];
                 $userId = $reservation['user_id'];
                 
+                // Get vehicle name and image if vehicle_id exists
+                $vehicle_name = null;
+                $vehicle_image = null;
+                if ($reservation['vehicle_id']) {
+                    $stmt = $pdo->prepare("SELECT vehicle_name, vehicle_image FROM vehicles WHERE id = ?");
+                    $stmt->execute([$reservation['vehicle_id']]);
+                    $vehicle = $stmt->fetch();
+                    if ($vehicle) {
+                        $vehicle_name = $vehicle['vehicle_name'];
+                        $vehicle_image = $vehicle['vehicle_image'];
+                    }
+                }
+                
                 // Ensure reservation_history entry exists (create if not exists, update if exists)
                 try {
                     // Check if history entry exists
@@ -633,8 +1022,8 @@ try {
                         // Create history entry if it doesn't exist
                         $stmt = $pdo->prepare("
                             INSERT INTO reservation_history 
-                            (reservation_id, user_id, slot_id, vehicle_id, vehicle_no, reservation_name, status, reserved_at, checked_in_at, checked_out_at, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, 'cancelled', ?, ?, NOW(), NOW())
+                            (reservation_id, user_id, slot_id, vehicle_id, vehicle_no, vehicle_name, vehicle_image, reservation_name, status, reserved_at, checked_in_at, checked_out_at, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cancelled', ?, ?, NOW(), NOW())
                         ");
                         $stmt->execute([
                             $reservationId,
@@ -642,6 +1031,8 @@ try {
                             $reservation['slot_id'],
                             $reservation['vehicle_id'],
                             $reservation['vehicle_no'],
+                            $vehicle_name,
+                            $vehicle_image,
                             $reservation['reservation_name'],
                             $reservation['reserved_at'],
                             $reservation['checked_in_at']
@@ -904,7 +1295,10 @@ try {
                     rh.status,
                     rh.reserved_at,
                     rh.checked_in_at,
-                    rh.checked_out_at
+                    rh.checked_out_at,
+                    rh.vehicle_name,
+                    rh.vehicle_no,
+                    rh.vehicle_image
                 FROM reservation_history rh
                 LEFT JOIN parking_slots p ON p.id = rh.slot_id
                 WHERE rh.user_id = ? 
@@ -1003,7 +1397,10 @@ try {
                 'status' => $item['status'],
                 'reserved_time' => $reservedTime,
                 'checked_in_time' => $checkedInTime,
-                'checked_out_time' => $checkedOutTime
+                'checked_out_time' => $checkedOutTime,
+                'vehicle_name' => $item['vehicle_name'] ?? null,
+                'vehicle_no' => $item['vehicle_no'] ?? null,
+                'vehicle_image' => $item['vehicle_image'] ?? null
             ];
         }
 
