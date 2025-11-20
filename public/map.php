@@ -249,7 +249,9 @@ require_once __DIR__ . '/../src/db.php';
   <div class="header">
     <h1>🚗 IT Department Parking</h1>
     <div class="header-actions">
-      <a href="/IT-PARKING-MANAGEMENT/public/index.php" class="btn btn-secondary">Dashboard</a>
+      <?php if (!is_admin()): ?>
+        <a href="/IT-PARKING-MANAGEMENT/public/index.php" class="btn btn-secondary">Dashboard</a>
+      <?php endif; ?>
     </div>
   </div>
 

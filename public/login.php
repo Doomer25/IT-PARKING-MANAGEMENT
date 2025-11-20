@@ -14,6 +14,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($login_type === 'admin') {
             // Admin login
             if (attempt_admin_login($email, $password)) {
+                // Log admin login activity
+                require_once __DIR__ . '/../src/db.php';
+                log_activity(null, 'admin logged in', ['username' => $email]);
+                
                 header('Location: /IT-PARKING-MANAGEMENT/public/admin/dashboard.php');
                 exit;
             } else {
@@ -23,6 +27,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Regular user login
             $user = attempt_login($email, $password);
             if ($user) {
+                // Log login activity
+                require_once __DIR__ . '/../src/db.php';
+                log_activity($user['id'], 'logged in', ['email' => $email]);
+                
                 // Redirect to dashboard instead of map after login
                 header('Location: /IT-PARKING-MANAGEMENT/public/index.php');
                 exit;

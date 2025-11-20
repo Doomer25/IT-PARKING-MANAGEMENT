@@ -87,6 +87,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $pdo->commit();
+                
+                // Log registration activity
+                log_activity($user_id, 'registered account', [
+                    'name' => $name,
+                    'email' => $email,
+                    'user_type' => $user_type,
+                    'vehicles_count' => count($vehicles)
+                ]);
+                
                 $success = 'Registered. You can now <a href="login.php">login</a>.';
 
                 // Optional: clear form values after success

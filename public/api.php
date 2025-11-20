@@ -313,6 +313,17 @@ try {
         }
 
         $pdo->commit();
+        
+        // Log reservation activity
+        log_activity($userId, 'reserved slot', [
+            'slot_id' => $slotId,
+            'slot_label' => $slotLabel,
+            'vehicle_id' => $vehicle_id > 0 ? $vehicle_id : null,
+            'vehicle_no' => $vehicle_no,
+            'reservation_start_time' => $reservation_start_time,
+            'reservation_end_time' => $reservation_end_time
+        ]);
+        
         echo json_encode(['success' => true]);
         exit;
     }
@@ -346,6 +357,20 @@ try {
                 WHERE reservation_id = ? AND status != 'completed' AND checked_in_at IS NULL
             ");
             $stmt->execute([$reservation['id']]);
+        }
+        
+        // Log check-in activity
+        if ($reservation) {
+            $stmt = $pdo->prepare("SELECT slot_id, vehicle_no FROM reservations WHERE id = ?");
+            $stmt->execute([$reservation['id']]);
+            $reservationDetails = $stmt->fetch();
+            if ($reservationDetails) {
+                log_activity($uid, 'checked in', [
+                    'reservation_id' => $reservation['id'],
+                    'slot_id' => $reservationDetails['slot_id'],
+                    'vehicle_no' => $reservationDetails['vehicle_no']
+                ]);
+            }
         }
         
         echo json_encode(['success' => true]);
@@ -427,6 +452,16 @@ try {
             // Delete from active reservations (after saving to history)
             $stmt = $pdo->prepare("DELETE FROM reservations WHERE user_id=?");
             $stmt->execute([$uid]);
+            
+            // Log cancellation activity
+            if ($reservation) {
+                log_activity($uid, 'cancelled reservation', [
+                    'reservation_id' => $reservationId,
+                    'slot_id' => $reservation['slot_id'],
+                    'vehicle_no' => $reservation['vehicle_no'],
+                    'status' => $reservation['status']
+                ]);
+            }
             
             $pdo->commit();
             echo json_encode(['success' => true]);
@@ -516,6 +551,16 @@ try {
             // Delete from active reservations (after saving to history)
             $stmt = $pdo->prepare("DELETE FROM reservations WHERE user_id=?");
             $stmt->execute([$uid]);
+            
+            // Log check-out activity
+            if ($reservation) {
+                log_activity($uid, 'checked out', [
+                    'reservation_id' => $reservationId,
+                    'slot_id' => $reservation['slot_id'],
+                    'vehicle_no' => $reservation['vehicle_no'],
+                    'status' => $reservation['status']
+                ]);
+            }
             
             $pdo->commit();
             echo json_encode(['success' => true]);
@@ -721,8 +766,16 @@ try {
             VALUES (?, ?, ?, ?, NOW())
         ");
         $stmt->execute([$uid, $vehicle_name, $vehicle_no, $vehicle_image]);
+        $vehicleId = $pdo->lastInsertId();
         
-        echo json_encode(['success' => true, 'id' => $pdo->lastInsertId()]);
+        // Log vehicle addition activity
+        log_activity($uid, 'added vehicle', [
+            'vehicle_id' => $vehicleId,
+            'vehicle_name' => $vehicle_name,
+            'vehicle_no' => $vehicle_no
+        ]);
+        
+        echo json_encode(['success' => true, 'id' => $vehicleId]);
         exit;
     }
 
@@ -893,8 +946,22 @@ try {
             exit;
         }
 
+        // Get vehicle details before deletion for logging
+        $stmt = $pdo->prepare("SELECT vehicle_name, vehicle_no FROM vehicles WHERE id = ? AND user_id = ?");
+        $stmt->execute([$vehicle_id, $uid]);
+        $vehicle = $stmt->fetch();
+        
         $stmt = $pdo->prepare("DELETE FROM vehicles WHERE id = ? AND user_id = ?");
         $stmt->execute([$vehicle_id, $uid]);
+        
+        // Log vehicle deletion activity
+        if ($vehicle) {
+            log_activity($uid, 'deleted vehicle', [
+                'vehicle_id' => $vehicle_id,
+                'vehicle_name' => $vehicle['vehicle_name'],
+                'vehicle_no' => $vehicle['vehicle_no']
+            ]);
+        }
         
         echo json_encode(['success' => true]);
         exit;
@@ -1049,6 +1116,16 @@ try {
             $stmt = $pdo->prepare("DELETE FROM reservations WHERE slot_id = ?");
             $stmt->execute([$slotId]);
             
+            // Log admin free slot activity
+            if ($reservation) {
+                log_activity(null, 'admin freed slot', [
+                    'slot_id' => $slotId,
+                    'reservation_id' => $reservationId,
+                    'user_id' => $userId,
+                    'vehicle_no' => $reservation['vehicle_no']
+                ]);
+            }
+            
             $pdo->commit();
             echo json_encode(['success' => true]);
         } catch (Exception $e) {
@@ -1086,6 +1163,11 @@ try {
             $stmt = $pdo->prepare("DELETE FROM reservations WHERE user_id = ?");
             $stmt->execute([$user_id]);
             
+            // Get user details before deletion for logging
+            $stmt = $pdo->prepare("SELECT name, email FROM users WHERE id = ?");
+            $stmt->execute([$user_id]);
+            $user = $stmt->fetch();
+            
             // Delete user's vehicles
             $stmt = $pdo->prepare("DELETE FROM vehicles WHERE user_id = ?");
             $stmt->execute([$user_id]);
@@ -1093,6 +1175,15 @@ try {
             // Delete user
             $stmt = $pdo->prepare("DELETE FROM users WHERE id = ?");
             $stmt->execute([$user_id]);
+            
+            // Log admin delete user activity
+            if ($user) {
+                log_activity(null, 'admin deleted user', [
+                    'user_id' => $user_id,
+                    'user_name' => $user['name'],
+                    'user_email' => $user['email']
+                ]);
+            }
             
             $pdo->commit();
             echo json_encode(['success' => true]);
@@ -1602,6 +1693,11 @@ try {
             $stmt = $pdo->prepare("DELETE FROM reservations WHERE user_id = ?");
             $stmt->execute([$user_id]);
             
+            // Get user details before deletion for logging
+            $stmt = $pdo->prepare("SELECT name, email FROM users WHERE id = ?");
+            $stmt->execute([$user_id]);
+            $user = $stmt->fetch();
+            
             // Delete user's vehicles
             $stmt = $pdo->prepare("DELETE FROM vehicles WHERE user_id = ?");
             $stmt->execute([$user_id]);
@@ -1609,6 +1705,14 @@ try {
             // Delete user
             $stmt = $pdo->prepare("DELETE FROM users WHERE id = ?");
             $stmt->execute([$user_id]);
+            
+            // Log account deletion activity
+            if ($user) {
+                log_activity($user_id, 'deleted own account', [
+                    'user_name' => $user['name'],
+                    'user_email' => $user['email']
+                ]);
+            }
             
             $pdo->commit();
             

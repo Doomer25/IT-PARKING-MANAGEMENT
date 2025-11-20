@@ -50,3 +50,37 @@ if (!function_exists('getPDO')) {
         return db();
     }
 }
+
+/**
+ * Log activity to activity_logs table
+ * @param int|null $user_id User ID (null for system/admin actions)
+ * @param string $action Action description (e.g., "reserved slot", "logged in")
+ * @param string|array|null $details Additional details (will be JSON encoded if array)
+ * @return bool Success status
+ */
+function log_activity($user_id, $action, $details = null) {
+    try {
+        $pdo = db();
+        
+        // Convert details to JSON string if array
+        $details_json = null;
+        if ($details !== null) {
+            if (is_array($details)) {
+                $details_json = json_encode($details);
+            } else {
+                $details_json = (string)$details;
+            }
+        }
+        
+        $stmt = $pdo->prepare("
+            INSERT INTO activity_logs (user_id, action, details, created_at)
+            VALUES (?, ?, ?, NOW())
+        ");
+        $stmt->execute([$user_id, $action, $details_json]);
+        return true;
+    } catch (Exception $e) {
+        // Log error but don't fail the main operation
+        error_log("Failed to log activity: " . $e->getMessage());
+        return false;
+    }
+}

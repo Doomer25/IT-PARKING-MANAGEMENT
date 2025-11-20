@@ -259,6 +259,7 @@ $reservations = $stmt->fetchAll();
   <div class="header">
     <h1>⚙️ Admin Dashboard</h1>
     <div class="header-actions">
+      <a class="btn btn-secondary" href="/IT-PARKING-MANAGEMENT/public/admin/activities.php">📋 Activities</a>
       <a class="btn btn-secondary" href="/IT-PARKING-MANAGEMENT/public/map.php">🗺️ View Map</a>
       <a class="btn btn-primary" href="/IT-PARKING-MANAGEMENT/public/logout.php">Logout</a>
     </div>
